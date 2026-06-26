@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from utils.database import init_db, authenticate
+from utils.database import init_db, authenticate, criar_sessao
 from utils.style import COR_TEAL
 
 st.set_page_config(
@@ -99,6 +99,9 @@ def do_login(username: str, password: str):
     user = authenticate(username.strip(), password)
     if user:
         st.session_state.usuario = user
+        token = criar_sessao(user["username"])
+        st.session_state.session_token = token
+        st.query_params["s"] = token
         st.switch_page("pages/2_📊_Dashboard.py")
     else:
         st.error("Usuário ou senha incorretos.")
