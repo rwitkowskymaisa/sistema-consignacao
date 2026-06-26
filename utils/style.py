@@ -278,6 +278,14 @@ hr {{
 /* ── Ocultar elementos padrão do Streamlit ── */
 #MainMenu, footer, header {{ visibility: hidden; }}
 .stDeployButton {{ display: none; }}
+
+/* ── Ocultar rótulo "app" e separadores do menu lateral ── */
+section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] span,
+section[data-testid="stSidebar"] .st-emotion-cache-1rtdyuf,
+section[data-testid="stSidebar"] .st-emotion-cache-6tkfeg,
+section[data-testid="stSidebar"] p.st-emotion-cache-pkbazv {{
+    display: none !important;
+}}
 </style>
 """
 
@@ -286,17 +294,9 @@ def sidebar_header(usuario: dict):
     """Renderiza cabeçalho da sidebar com logo e info do usuário."""
     import streamlit as st
 
-    is_admin = usuario.get("papel") == "admin"
-    papel_label = "Administrador" if is_admin else "Vendedor"
-
-    st.sidebar.markdown(f"""
-    <div class="sidebar-logo">
-        {LOGO_SVG}
-    </div>
-    """, unsafe_allow_html=True)
-
+    # Logo sem div aninhado para evitar tag solta
     st.sidebar.markdown(
-        '<div class="sidebar-section">Análise</div>',
+        f'<div class="sidebar-logo">{LOGO_SVG}</div>',
         unsafe_allow_html=True
     )
 
