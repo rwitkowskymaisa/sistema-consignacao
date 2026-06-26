@@ -34,25 +34,13 @@ html, body, [class*="css"] {{
     min-height: 100vh;
 }}
 
-.login-wrapper {{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 40px 20px;
-}}
-.login-card {{
+/* ── Card da coluna central ── */
+[data-testid="column"]:nth-child(2) > div:first-child {{
     background: #FFFFFF;
     border-radius: 20px;
-    padding: 48px 52px;
-    width: 100%;
-    max-width: 420px;
-    box-shadow: 0 25px 60px rgba(0,0,0,0.4);
-}}
-.login-logo {{
-    margin-bottom: 32px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid #E5E7EB;
+    padding: 40px 48px 32px 48px;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.45);
+    margin-top: 60px;
 }}
 .login-title {{
     font-size: 22px;
@@ -63,7 +51,9 @@ html, body, [class*="css"] {{
 .login-sub {{
     font-size: 13px;
     color: #6B7280;
-    margin-bottom: 28px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #E5E7EB;
 }}
 .stTextInput > label {{
     color: #374151 !important;
@@ -92,6 +82,7 @@ html, body, [class*="css"] {{
     font-size: 14px !important;
     letter-spacing: 0.03em !important;
     transition: all 0.2s !important;
+    margin-top: 8px !important;
 }}
 .stButton > button:hover {{
     background: #009589 !important;
@@ -102,8 +93,8 @@ html, body, [class*="css"] {{
     text-align: center;
     font-size: 11px;
     color: #9CA3AF;
-    margin-top: 20px;
-    padding-top: 16px;
+    margin-top: 16px;
+    padding-top: 12px;
     border-top: 1px solid #F3F4F6;
 }}
 </style>
@@ -143,12 +134,11 @@ if st.session_state.usuario:
             st.rerun()
     st.stop()
 
-# Tela de login
-col_a, col_b, col_c = st.columns([1, 1.2, 1])
-with col_b:
-    # Logo SVG em fundo escuro (renderizado inline)
+# Logo acima do card (fora da coluna branca)
+_, logo_col, _ = st.columns([1, 1.2, 1])
+with logo_col:
     st.markdown(f"""
-    <div style="text-align:center;margin-bottom:32px;">
+    <div style="text-align:center;padding:48px 0 0 0;">
         <svg width="200" height="64" viewBox="0 0 200 64" xmlns="http://www.w3.org/2000/svg">
             <text x="8" y="44" font-family="Georgia,serif" font-size="38" font-weight="700"
                   fill="#FFFFFF" letter-spacing="-1">artmed</text>
@@ -160,11 +150,12 @@ with col_b:
     </div>
     """, unsafe_allow_html=True)
 
+# Tela de login — card branco
+col_a, col_b, col_c = st.columns([1, 1.2, 1])
+with col_b:
     st.markdown("""
-    <div class="login-card">
-        <div class="login-title">Acesso ao Sistema</div>
-        <div class="login-sub">Análise de Consignação · Acesso restrito</div>
-    </div>
+    <div class="login-title">Acesso ao Sistema</div>
+    <div class="login-sub">Análise de Consignação · Acesso restrito</div>
     """, unsafe_allow_html=True)
 
     with st.form("login_form"):
