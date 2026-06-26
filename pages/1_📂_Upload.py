@@ -13,17 +13,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import upsert_produtos, upsert_saldo_consignado, upsert_faturamento, upsert_tes, init_db
 from utils.style import apply_theme, sidebar_header, sidebar_footer
+from utils.auth import require_login
 
 st.set_page_config(page_title="Upload · Consignação", page_icon="📂", layout="wide",
                    initial_sidebar_state="expanded")
 init_db()
 apply_theme()
 
-if "usuario" not in st.session_state or not st.session_state.usuario:
-    st.warning("⚠️ Faça login para acessar esta página.")
-    st.stop()
-
-usuario = st.session_state.usuario
+usuario  = require_login()
 is_admin = usuario["papel"] == "admin"
 
 sidebar_header(usuario)

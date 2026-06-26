@@ -17,18 +17,15 @@ from utils.database import (
 from utils.email_service import build_mapa_email_html, send_email_graph
 from utils.mapa_generator import gerar_mapa_excel
 from utils.style import apply_theme, sidebar_header, sidebar_footer
+from utils.auth import require_login
 
 st.set_page_config(page_title="Envio Mapa · Consignação", page_icon="📧", layout="wide",
                    initial_sidebar_state="expanded")
 init_db()
 apply_theme()
 
-if "usuario" not in st.session_state or not st.session_state.usuario:
-    st.warning("⚠️ Faça login para acessar esta página.")
-    st.stop()
-
-usuario = st.session_state.usuario
-is_admin = usuario["papel"] == "admin"
+usuario     = require_login()
+is_admin    = usuario["papel"] == "admin"
 gcon_filter = None if is_admin else usuario.get("cod_gcon")
 
 sidebar_header(usuario)

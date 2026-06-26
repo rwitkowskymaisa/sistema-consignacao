@@ -16,6 +16,7 @@ from utils.database import (
     get_all_users, get_clientes, init_db
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer, COR_TEAL
+from utils.auth import require_login
 
 st.set_page_config(page_title="Dashboard · Artmed Consignação",
                    page_icon="📊", layout="wide",
@@ -23,11 +24,7 @@ st.set_page_config(page_title="Dashboard · Artmed Consignação",
 init_db()
 apply_theme()
 
-if "usuario" not in st.session_state or not st.session_state.usuario:
-    st.warning("⚠️ Faça login para acessar esta página.")
-    st.stop()
-
-usuario     = st.session_state.usuario
+usuario = require_login()
 is_admin    = usuario["papel"] == "admin"
 cod_gcon_u  = usuario.get("cod_gcon")
 gcon_filter = None if is_admin else cod_gcon_u
