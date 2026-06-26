@@ -1,85 +1,103 @@
 """
 Módulo de banco de dados — SQLite (dev) / PostgreSQL via Supabase (produção)
 Sistema de Análise de Consignação
-
-Schema baseado nos arquivos reais:
-  - Saldo Consignado: Cod., Cliente, Gcon, Codigo (ISBN), Qtde Remet/Dev/Acert/Saldo, Valor
-  - Base de Produtos: ISBN, Produto, Preço de Venda, Curva, Cobertura, vendas 3/6/12/24m
 """
-import sqlite3
 import hashlib
 import os
 import secrets
 from datetime import datetime
 from pathlib import Path
+
 import pandas as pd
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 
-# ─── CONEXÃO ─────────────────────────────────────────────────────────────────
+# ─── ENGINE ──────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent.parent
-DB_PATH = BASE_DIR / "data" / "consignacao.db"
+DB_PATH  = BASE_DIR / "data" / "consignacao.db"
 
+_engine = None
 
-def get_connection():
-    """
-    Retorna conexão ativa.
-    Em produção com DATABASE_URL, usa PostgreSQL (Supabase).
-    Em desenvolvimento, usa SQLite local.
-    """
+def get_engine():
+    global _engine
+    if _engine is not None:
+        return _engine
+
     db_url = os.environ.get("DATABASE_URL", "")
-
-    if db_url and db_url.startswith("postgresql"):
-        # Produção — PostgreSQL / Supabase
-        try:
-            import sqlalchemy
-            from sqlalchemy import create_engine, text
-            engine = create_engine(db_url)
-            return engine.connect()
-        except ImportError:
-            pass  # fallback para SQLite
-
-    # Desenvolvimento — SQLite
-    DB_PATH.parent.mkdir(exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    if db_url and "postgresql" in db_url:
+        _engine = create_engine(
+            db_url,
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+        )
+    else:
+        DB_PATH.parent.mkdir(exist_ok=True)
+        _engine = create_engine(
+            f"sqlite:///{DB_PATH}",
+            connect_args={"check_same_thread": False},
+        )
+    return _engine
 
 
-def _is_sqlite(conn) -> bool:
-    return isinstance(conn, sqlite3.Connection)
+def _is_pg() -> bool:
+    return "postgresql" in os.environ.get("DATABASE_URL", "")
+
+
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+def _exec(conn, sql: str, params: dict = None):
+    """Executa SQL usando text() — compatível com SQLite e PostgreSQL."""
+    if params:
+        return conn.execute(text(sql), params)
+    return conn.execute(text(sql))
+
+
+def _serial() -> str:
+    """Tipo de coluna auto-incremento conforme o banco."""
+    return "SERIAL" if _is_pg() else "INTEGER"
+
+
+def _insert_ignore() -> str:
+    """Prefixo de INSERT que ignora duplicatas."""
+    return "INSERT" if _is_pg() else "INSERT OR IGNORE"
+
+
+def _conflict_ignore() -> str:
+    """Sufixo para ignorar conflito de chave única no PostgreSQL."""
+    return "ON CONFLICT DO NOTHING" if _is_pg() else ""
 
 
 # ─── INICIALIZAÇÃO ────────────────────────────────────────────────────────────
 def init_db():
     """Cria todas as tabelas se não existirem."""
-    conn = get_connection()
-    c = conn.cursor() if _is_sqlite(conn) else conn
+    eng = get_engine()
+    serial = _serial()
+    ci = _conflict_ignore()
 
-    # ── USUÁRIOS ──────────────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ddl_list = [
+        # USUÁRIOS
+        f"""CREATE TABLE IF NOT EXISTS usuarios (
+            id {serial} PRIMARY KEY,
             nome TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
-            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL,
+            username TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             papel TEXT NOT NULL DEFAULT 'vendedor',
             email_envio TEXT,
-            cod_gcon TEXT,          -- código Gcon do vendedor no sistema (ex: VD0005)
+            cod_gcon TEXT,
             ativo INTEGER DEFAULT 1,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── BASE DE PRODUTOS ──────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS produtos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            isbn TEXT NOT NULL UNIQUE,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(email),
+            UNIQUE(username)
+        )""",
+        # BASE DE PRODUTOS
+        f"""CREATE TABLE IF NOT EXISTS produtos (
+            id {serial} PRIMARY KEY,
+            isbn TEXT NOT NULL,
             cod_barras TEXT,
             autor TEXT,
-            produto TEXT NOT NULL,      -- título
+            produto TEXT NOT NULL,
             preco_venda REAL,
             status TEXT,
             estoque_sp INTEGER,
@@ -93,7 +111,7 @@ def init_db():
             area TEXT,
             subarea TEXT,
             formato TEXT,
-            curva TEXT,                 -- A / B / C
+            curva TEXT,
             phase_out TEXT,
             custo_stand REAL,
             estoque_terc INTEGER,
@@ -105,88 +123,77 @@ def init_db():
             vendas_3m REAL,
             mediana_12m REAL,
             mediana_24m REAL,
-            upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── SALDO CONSIGNADO ──────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS saldo_consignado (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cod_loja TEXT,              -- Cod+Loja
-            cnpj TEXT,                  -- CNPJ do cliente
-            codigo_cliente TEXT,        -- Cod.
-            loja TEXT,                  -- Lj.
-            cod_gcon TEXT,              -- Gcon (código do vendedor)
+            upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(isbn)
+        )""",
+        # SALDO CONSIGNADO
+        f"""CREATE TABLE IF NOT EXISTS saldo_consignado (
+            id {serial} PRIMARY KEY,
+            cod_loja TEXT,
+            cnpj TEXT,
+            codigo_cliente TEXT,
+            loja TEXT,
+            cod_gcon TEXT,
             uf TEXT,
-            razao_social TEXT,          -- Cliente
-            nf_serie TEXT,              -- NF/Serie
-            data_emissao DATE,          -- Data Emissão
-            isbn TEXT,                  -- Codigo (ISBN)
+            razao_social TEXT,
+            nf_serie TEXT,
+            data_emissao DATE,
+            isbn TEXT,
             cod_barras TEXT,
             titulo TEXT,
             autor TEXT,
-            desconto REAL,              -- Desconto (ex: 0.5 = 50%)
-            status_titulo TEXT,         -- STATUS (Disponivel, etc.)
-            qtde_remessa INTEGER,       -- Qtde Remet
-            qtde_dev_acert INTEGER,     -- Qtde Dev/Acert
-            qtde_saldo INTEGER,         -- Qtde Saldo (em estoque no cliente)
-            valor_liquido REAL,         -- Valor Liquido
-            valor_bruto REAL,           -- Valor Bruto
+            desconto REAL,
+            status_titulo TEXT,
+            qtde_remessa INTEGER,
+            qtde_dev_acert INTEGER,
+            qtde_saldo INTEGER,
+            valor_liquido REAL,
+            valor_bruto REAL,
             upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── TABELA TES ────────────────────────────────────────────────────────────
-    # Classifica cada código TES como: Venda | Acerto Consignação | Envio Consignação | Outros
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tabela_tes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cod_tes INTEGER NOT NULL UNIQUE,
+        )""",
+        # TABELA TES
+        f"""CREATE TABLE IF NOT EXISTS tabela_tes (
+            id {serial} PRIMARY KEY,
+            cod_tes INTEGER NOT NULL,
             txt_padrao TEXT,
             finalidade TEXT,
             tipo_tes TEXT,
             faturamento TEXT,
             status TEXT,
-            tipo TEXT NOT NULL          -- Venda | Acerto Consignação | Envio Consignação | Outros
-        )
-    """)
-
-    # ── FATURAMENTO ───────────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS faturamento (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            UNIQUE(cod_tes)
+        )""",
+        # FATURAMENTO
+        f"""CREATE TABLE IF NOT EXISTS faturamento (
+            id {serial} PRIMARY KEY,
             nro_pedido TEXT,
             filial TEXT,
-            codigo_cliente TEXT,        -- Codigo Cliente
+            codigo_cliente TEXT,
             loja TEXT,
-            razao_social TEXT,          -- Cliente
-            data_emissao DATE,          -- Data Emissão (pedido)
-            isbn TEXT,                  -- Codigo Produto
-            titulo TEXT,                -- Produto
+            razao_social TEXT,
+            data_emissao DATE,
+            isbn TEXT,
+            titulo TEXT,
             editora TEXT,
             qtd_solicitada INTEGER,
-            qtd_atendida INTEGER,       -- quantidade efetivamente faturada
+            qtd_atendida INTEGER,
             qtd_nao_atendida INTEGER,
             valor_unitario REAL,
-            valor_atendido REAL,        -- receita realizada
+            valor_atendido REAL,
             valor_nao_atendido REAL,
-            preco_capa REAL,            -- Preço Capa Unitário
-            desconto_pct REAL,          -- Desconto %
+            preco_capa REAL,
+            desconto_pct REAL,
             status_produto TEXT,
-            cod_gcon TEXT,              -- Codigo Vendedor (= Gcon)
-            controle TEXT,              -- Controle Atendimento
-            data_nota DATE,             -- Data Emissão Nota
-            nro_nota TEXT,              -- Nro Nota Faturamento
-            cod_tes INTEGER,            -- Código TES (FK para tabela_tes)
+            cod_gcon TEXT,
+            controle TEXT,
+            data_nota DATE,
+            nro_nota TEXT,
+            cod_tes INTEGER,
             upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # ── CLIENTES ──────────────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        )""",
+        # CLIENTES
+        f"""CREATE TABLE IF NOT EXISTS clientes (
+            id {serial} PRIMARY KEY,
             codigo_cliente TEXT NOT NULL,
             cnpj TEXT,
             cod_gcon TEXT,
@@ -195,13 +202,10 @@ def init_db():
             email TEXT,
             ativo INTEGER DEFAULT 1,
             UNIQUE(codigo_cliente)
-        )
-    """)
-
-    # ── ENVIOS DO MAPA ────────────────────────────────────────────────────────
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS envios_mapa (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        )""",
+        # ENVIOS DO MAPA
+        f"""CREATE TABLE IF NOT EXISTS envios_mapa (
+            id {serial} PRIMARY KEY,
             codigo_cliente TEXT NOT NULL,
             razao_social TEXT,
             email_cliente TEXT,
@@ -212,26 +216,20 @@ def init_db():
             codigo_rastreio TEXT,
             observacao TEXT,
             reenviado INTEGER DEFAULT 0
-        )
-    """)
+        )""",
+    ]
 
-    conn.commit()
-
-    # ── Migrações para bancos já existentes ──────────────────────────────────
-    # Adiciona coluna cod_tes na tabela faturamento se ainda não existir
-    try:
-        conn.execute("ALTER TABLE faturamento ADD COLUMN cod_tes INTEGER")
-        conn.commit()
-    except Exception:
-        pass  # Coluna já existe
-
-    # Admin padrão
-    row = conn.execute("SELECT id FROM usuarios WHERE username = 'admin'").fetchone()
-    if not row:
-        _insert_user(conn, "Administrador", "admin@empresa.com", "admin", "admin123", "admin")
+    with eng.connect() as conn:
+        for ddl in ddl_list:
+            _exec(conn, ddl)
         conn.commit()
 
-    conn.close()
+        # Admin padrão
+        row = _exec(conn, "SELECT id FROM usuarios WHERE username = 'admin'").fetchone()
+        if not row:
+            _insert_user_conn(conn, "Administrador", "admin@empresa.com",
+                              "admin", "admin123", "admin")
+            conn.commit()
 
 
 # ─── USUÁRIOS ─────────────────────────────────────────────────────────────────
@@ -240,72 +238,81 @@ def _hash(pw: str) -> str:
     return hashlib.sha256(f"consignacao_salt_v1{pw}".encode()).hexdigest()
 
 
-def _insert_user(conn, nome, email, username, password, papel="vendedor",
-                 email_envio=None, cod_gcon=None):
-    conn.execute("""
-        INSERT OR IGNORE INTO usuarios
+def _insert_user_conn(conn, nome, email, username, password,
+                      papel="vendedor", email_envio=None, cod_gcon=None):
+    ci = _conflict_ignore()
+    sql = f"""
+        INSERT INTO usuarios
         (nome, email, username, password_hash, papel, email_envio, cod_gcon)
-        VALUES (?,?,?,?,?,?,?)
-    """, (nome, email, username, _hash(password), papel, email_envio or email, cod_gcon))
+        VALUES (:nome, :email, :username, :pw, :papel, :email_envio, :cod_gcon)
+        {ci}
+    """
+    _exec(conn, sql, {
+        "nome": nome, "email": email, "username": username,
+        "pw": _hash(password), "papel": papel,
+        "email_envio": email_envio or email, "cod_gcon": cod_gcon,
+    })
 
 
 def authenticate(username: str, password: str):
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM usuarios WHERE username=? AND ativo=1", (username,)
-    ).fetchone()
-    conn.close()
-    if row and row["password_hash"] == _hash(password):
-        return dict(row)
+    eng = get_engine()
+    with eng.connect() as conn:
+        row = _exec(conn,
+            "SELECT * FROM usuarios WHERE username=:u AND ativo=1",
+            {"u": username}
+        ).fetchone()
+    if row and row._mapping["password_hash"] == _hash(password):
+        return dict(row._mapping)
     return None
 
 
 def get_all_users() -> list:
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT id,nome,email,username,papel,email_envio,cod_gcon,ativo FROM usuarios ORDER BY nome"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    eng = get_engine()
+    with eng.connect() as conn:
+        rows = _exec(conn,
+            "SELECT id,nome,email,username,papel,email_envio,cod_gcon,ativo "
+            "FROM usuarios ORDER BY nome"
+        ).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 def create_user(nome, email, username, password, papel="vendedor",
                 email_envio=None, cod_gcon=None):
-    conn = get_connection()
+    eng = get_engine()
     try:
-        _insert_user(conn, nome, email, username, password, papel, email_envio, cod_gcon)
-        conn.commit()
+        with eng.connect() as conn:
+            _insert_user_conn(conn, nome, email, username, password,
+                              papel, email_envio, cod_gcon)
+            conn.commit()
         return True, "Usuário criado com sucesso."
-    except sqlite3.IntegrityError as e:
-        return False, f"Usuário ou email já existe."
-    finally:
-        conn.close()
+    except Exception as e:
+        return False, "Usuário ou email já existe."
 
 
 def update_user_password(username, new_password):
-    conn = get_connection()
-    conn.execute("UPDATE usuarios SET password_hash=? WHERE username=?",
-                 (_hash(new_password), username))
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "UPDATE usuarios SET password_hash=:pw WHERE username=:u",
+            {"pw": _hash(new_password), "u": username}
+        )
+        conn.commit()
 
 
 def toggle_user_active(user_id: int, ativo: bool):
-    conn = get_connection()
-    conn.execute("UPDATE usuarios SET ativo=? WHERE id=?", (int(ativo), user_id))
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "UPDATE usuarios SET ativo=:a WHERE id=:id",
+            {"a": int(ativo), "id": user_id}
+        )
+        conn.commit()
 
 
 # ─── UPLOAD DE DADOS ──────────────────────────────────────────────────────────
 
 def upsert_produtos(df: pd.DataFrame) -> int:
-    """
-    Importa a base de produtos.
-    Colunas esperadas (após mapeamento): isbn, produto, preco_venda, curva, etc.
-    """
-    conn = get_connection()
-    conn.execute("DELETE FROM produtos")
+    eng = get_engine()
     cols_base = [
         "isbn", "cod_barras", "autor", "produto", "preco_venda", "status",
         "estoque_sp", "estoque_cl", "estoque_pr", "estoque_total",
@@ -318,23 +325,16 @@ def upsert_produtos(df: pd.DataFrame) -> int:
     for col in cols_base:
         if col not in df.columns:
             df[col] = None
-    df = df[cols_base].copy()
-    df = df.dropna(subset=["isbn"])
-    df.to_sql("produtos", conn, if_exists="append", index=False)
-    conn.commit()
-    n = len(df)
-    conn.close()
-    return n
+    df = df[cols_base].dropna(subset=["isbn"]).copy()
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM produtos")
+        conn.commit()
+    df.to_sql("produtos", eng, if_exists="append", index=False)
+    return len(df)
 
 
 def upsert_saldo_consignado(df: pd.DataFrame) -> int:
-    """
-    Importa o saldo consignado completo.
-    Substitui todos os registros existentes.
-    """
-    conn = get_connection()
-    conn.execute("DELETE FROM saldo_consignado")
-
+    eng = get_engine()
     cols = [
         "cod_loja", "cnpj", "codigo_cliente", "loja", "cod_gcon", "uf",
         "razao_social", "nf_serie", "data_emissao", "isbn", "cod_barras",
@@ -345,40 +345,33 @@ def upsert_saldo_consignado(df: pd.DataFrame) -> int:
     for col in cols:
         if col not in df.columns:
             df[col] = None
-    df = df[cols].copy()
-    df = df.dropna(subset=["codigo_cliente", "isbn"])
-    df.to_sql("saldo_consignado", conn, if_exists="append", index=False)
-    conn.commit()
-    n = len(df)
-    conn.close()
+    df = df[cols].dropna(subset=["codigo_cliente", "isbn"]).copy()
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM saldo_consignado")
+        conn.commit()
+    df.to_sql("saldo_consignado", eng, if_exists="append", index=False)
     _sync_clientes()
-    return n
+    return len(df)
 
 
 def upsert_tes(df: pd.DataFrame) -> int:
-    """
-    Importa a tabela TES completa.
-    Colunas esperadas: cod_tes, txt_padrao, finalidade, tipo_tes, faturamento, status, tipo
-    """
-    conn = get_connection()
-    conn.execute("DELETE FROM tabela_tes")
-    cols = ["cod_tes", "txt_padrao", "finalidade", "tipo_tes", "faturamento", "status", "tipo"]
+    eng = get_engine()
+    cols = ["cod_tes", "txt_padrao", "finalidade", "tipo_tes",
+            "faturamento", "status", "tipo"]
     for col in cols:
         if col not in df.columns:
             df[col] = None
-    df = df[cols].copy()
-    df = df.dropna(subset=["cod_tes"])
+    df = df[cols].dropna(subset=["cod_tes"]).copy()
     df["tipo"] = df["tipo"].fillna("Outros").str.strip()
-    df.to_sql("tabela_tes", conn, if_exists="append", index=False)
-    conn.commit()
-    n = len(df)
-    conn.close()
-    return n
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM tabela_tes")
+        conn.commit()
+    df.to_sql("tabela_tes", eng, if_exists="append", index=False)
+    return len(df)
 
 
 def upsert_faturamento(df: pd.DataFrame) -> int:
-    conn = get_connection()
-    conn.execute("DELETE FROM faturamento")
+    eng = get_engine()
     cols = [
         "nro_pedido", "filial", "codigo_cliente", "loja", "razao_social",
         "data_emissao", "isbn", "titulo", "editora",
@@ -390,119 +383,112 @@ def upsert_faturamento(df: pd.DataFrame) -> int:
     for col in cols:
         if col not in df.columns:
             df[col] = None
-    df = df[cols].copy()
-    df = df.dropna(subset=["codigo_cliente", "isbn"])
-    df.to_sql("faturamento", conn, if_exists="append", index=False)
-    conn.commit()
-    n = len(df)
-    conn.close()
-    return n
+    df = df[cols].dropna(subset=["codigo_cliente", "isbn"]).copy()
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM faturamento")
+        conn.commit()
+    df.to_sql("faturamento", eng, if_exists="append", index=False)
+    return len(df)
 
 
 def _sync_clientes():
-    """Sincroniza tabela de clientes a partir do saldo (inclui CNPJ)."""
-    conn = get_connection()
-    conn.execute("""
-        INSERT OR IGNORE INTO clientes (codigo_cliente, cnpj, cod_gcon, razao_social, uf)
-        SELECT DISTINCT codigo_cliente, cnpj, cod_gcon, razao_social, uf
-        FROM saldo_consignado
-        WHERE codigo_cliente IS NOT NULL
-    """)
-    # Atualiza CNPJ dos que já existem mas podem não ter CNPJ
-    conn.execute("""
-        UPDATE clientes
-        SET cnpj = (
-            SELECT cnpj FROM saldo_consignado s
-            WHERE s.codigo_cliente = clientes.codigo_cliente
-            AND s.cnpj IS NOT NULL LIMIT 1
-        )
-        WHERE cnpj IS NULL
-    """)
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    ci = _conflict_ignore()
+    with eng.connect() as conn:
+        _exec(conn, f"""
+            INSERT INTO clientes (codigo_cliente, cnpj, cod_gcon, razao_social, uf)
+            SELECT DISTINCT codigo_cliente, cnpj, cod_gcon, razao_social, uf
+            FROM saldo_consignado
+            WHERE codigo_cliente IS NOT NULL
+            {ci}
+        """)
+        _exec(conn, """
+            UPDATE clientes
+            SET cnpj = sq.cnpj
+            FROM (
+                SELECT DISTINCT ON (codigo_cliente) codigo_cliente, cnpj
+                FROM saldo_consignado
+                WHERE cnpj IS NOT NULL
+            ) sq
+            WHERE clientes.codigo_cliente = sq.codigo_cliente
+            AND clientes.cnpj IS NULL
+        """ if _is_pg() else """
+            UPDATE clientes
+            SET cnpj = (
+                SELECT cnpj FROM saldo_consignado s
+                WHERE s.codigo_cliente = clientes.codigo_cliente
+                AND s.cnpj IS NOT NULL LIMIT 1
+            )
+            WHERE cnpj IS NULL
+        """)
+        conn.commit()
 
 
 # ─── CONSULTAS ────────────────────────────────────────────────────────────────
 
 def get_saldo_df(cod_gcon: str = None) -> pd.DataFrame:
-    conn = get_connection()
-    q = "SELECT * FROM saldo_consignado"
-    params = None
+    eng = get_engine()
     if cod_gcon:
-        q += " WHERE cod_gcon=?"
-        params = (cod_gcon,)
-    df = pd.read_sql(q, conn, params=params)
-    conn.close()
-    return df
+        return pd.read_sql(
+            text("SELECT * FROM saldo_consignado WHERE cod_gcon=:g"),
+            eng, params={"g": cod_gcon}
+        )
+    return pd.read_sql(text("SELECT * FROM saldo_consignado"), eng)
 
 
 def get_produtos_df() -> pd.DataFrame:
-    conn = get_connection()
-    df = pd.read_sql("SELECT * FROM produtos", conn)
-    conn.close()
-    return df
+    return pd.read_sql(text("SELECT * FROM produtos"), get_engine())
 
 
 def get_tes_df() -> pd.DataFrame:
-    """Retorna a tabela TES completa."""
-    conn = get_connection()
-    df = pd.read_sql("SELECT * FROM tabela_tes", conn)
-    conn.close()
-    return df
+    return pd.read_sql(text("SELECT * FROM tabela_tes"), get_engine())
 
 
 def get_faturamento_df(cod_gcon: str = None, tipos_tes: list = None) -> pd.DataFrame:
-    """
-    Retorna faturamento enriquecido com tipo_tes da tabela TES.
-
-    tipos_tes: lista de tipos para filtrar, ex: ['Venda', 'Acerto Consignação']
-               None = todos os tipos.
-    """
-    conn = get_connection()
+    eng = get_engine()
     q = """
         SELECT f.*, COALESCE(t.tipo, 'Outros') AS tipo_tes
         FROM faturamento f
         LEFT JOIN tabela_tes t ON f.cod_tes = t.cod_tes
         WHERE 1=1
     """
-    params = []
+    params = {}
     if cod_gcon:
-        q += " AND f.cod_gcon=?"
-        params.append(cod_gcon)
-    df = pd.read_sql(q, conn, params=params or None)
-    conn.close()
+        q += " AND f.cod_gcon=:g"
+        params["g"] = cod_gcon
 
-    # Normaliza a coluna tipo_tes (remove espaços)
+    df = pd.read_sql(text(q), eng, params=params or None)
     df["tipo_tes"] = df["tipo_tes"].fillna("Outros").str.strip()
 
-    # Filtra por tipo se solicitado
     if tipos_tes:
         tipos_norm = [t.strip() for t in tipos_tes]
         df = df[df["tipo_tes"].isin(tipos_norm)]
-
     return df
 
 
 def get_clientes(cod_gcon: str = None) -> list:
-    conn = get_connection()
-    if cod_gcon:
-        rows = conn.execute(
-            "SELECT * FROM clientes WHERE cod_gcon=? AND ativo=1 ORDER BY razao_social",
-            (cod_gcon,)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM clientes WHERE ativo=1 ORDER BY razao_social"
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    eng = get_engine()
+    with eng.connect() as conn:
+        if cod_gcon:
+            rows = _exec(conn,
+                "SELECT * FROM clientes WHERE cod_gcon=:g AND ativo=1 ORDER BY razao_social",
+                {"g": cod_gcon}
+            ).fetchall()
+        else:
+            rows = _exec(conn,
+                "SELECT * FROM clientes WHERE ativo=1 ORDER BY razao_social"
+            ).fetchall()
+    return [dict(r._mapping) for r in rows]
 
 
 def update_cliente_email(codigo_cliente: str, email: str):
-    conn = get_connection()
-    conn.execute("UPDATE clientes SET email=? WHERE codigo_cliente=?", (email, codigo_cliente))
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "UPDATE clientes SET email=:e WHERE codigo_cliente=:c",
+            {"e": email, "c": codigo_cliente}
+        )
+        conn.commit()
 
 
 # ─── ENVIOS ───────────────────────────────────────────────────────────────────
@@ -511,46 +497,49 @@ def registrar_envio(codigo_cliente, razao_social, email_cliente,
                     cod_gcon, mes_referencia, status="enviado",
                     observacao=None, reenviado=False) -> str:
     codigo_rastreio = secrets.token_hex(8).upper()
-    conn = get_connection()
-    conn.execute("""
-        INSERT INTO envios_mapa
-        (codigo_cliente, razao_social, email_cliente, cod_gcon,
-         mes_referencia, status, codigo_rastreio, observacao, reenviado)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, (codigo_cliente, razao_social, email_cliente, cod_gcon,
-          mes_referencia, status, codigo_rastreio, observacao, int(reenviado)))
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn, """
+            INSERT INTO envios_mapa
+            (codigo_cliente, razao_social, email_cliente, cod_gcon,
+             mes_referencia, status, codigo_rastreio, observacao, reenviado)
+            VALUES (:cc, :rs, :ec, :cg, :mr, :st, :cr, :obs, :re)
+        """, {
+            "cc": codigo_cliente, "rs": razao_social, "ec": email_cliente,
+            "cg": cod_gcon, "mr": mes_referencia, "st": status,
+            "cr": codigo_rastreio, "obs": observacao, "re": int(reenviado),
+        })
+        conn.commit()
     return codigo_rastreio
 
 
 def get_envios_df(cod_gcon: str = None, mes_referencia: str = None) -> pd.DataFrame:
-    conn = get_connection()
+    eng = get_engine()
     q = "SELECT * FROM envios_mapa WHERE 1=1"
-    params = []
+    params = {}
     if cod_gcon:
-        q += " AND cod_gcon=?"
-        params.append(cod_gcon)
+        q += " AND cod_gcon=:g"
+        params["g"] = cod_gcon
     if mes_referencia:
-        q += " AND mes_referencia=?"
-        params.append(mes_referencia)
+        q += " AND mes_referencia=:mr"
+        params["mr"] = mes_referencia
     q += " ORDER BY data_envio DESC"
-    df = pd.read_sql(q, conn, params=params or None)
-    conn.close()
-    return df
+    return pd.read_sql(text(q), eng, params=params or None)
 
 
 def update_status_envio(envio_id: int, novo_status: str, observacao: str = None):
-    conn = get_connection()
-    conn.execute("UPDATE envios_mapa SET status=?, observacao=? WHERE id=?",
-                 (novo_status, observacao, envio_id))
-    conn.commit()
-    conn.close()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "UPDATE envios_mapa SET status=:s, observacao=:o WHERE id=:id",
+            {"s": novo_status, "o": observacao, "id": envio_id}
+        )
+        conn.commit()
 
 
 def get_status_envio_mes(cod_gcon: str = None) -> pd.DataFrame:
     mes_atual = datetime.now().strftime("%Y-%m")
-    conn = get_connection()
+    eng = get_engine()
     q = """
         SELECT c.codigo_cliente, c.cod_gcon, c.razao_social, c.uf, c.email,
                MAX(e.data_envio) as ultimo_envio,
@@ -559,16 +548,15 @@ def get_status_envio_mes(cod_gcon: str = None) -> pd.DataFrame:
         FROM clientes c
         LEFT JOIN envios_mapa e
             ON c.codigo_cliente = e.codigo_cliente
-            AND e.mes_referencia = ?
+            AND e.mes_referencia = :mes
         WHERE c.ativo = 1
     """
-    params = [mes_atual]
+    params = {"mes": mes_atual}
     if cod_gcon:
-        q += " AND c.cod_gcon = ?"
-        params.append(cod_gcon)
-    q += " GROUP BY c.codigo_cliente ORDER BY c.razao_social"
-    df = pd.read_sql(q, conn, params=params)
-    conn.close()
+        q += " AND c.cod_gcon = :g"
+        params["g"] = cod_gcon
+    q += " GROUP BY c.codigo_cliente, c.cod_gcon, c.razao_social, c.uf, c.email ORDER BY c.razao_social"
+    df = pd.read_sql(text(q), eng, params=params)
     df["mapa_enviado"] = df["ultimo_envio"].notna()
     return df
 
@@ -576,42 +564,34 @@ def get_status_envio_mes(cod_gcon: str = None) -> pd.DataFrame:
 # ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
 def get_analise_consignacao(cod_gcon: str = None) -> pd.DataFrame:
-    """
-    Análise principal: saldo + produto + acerto.
-
-    Acerto = qtde_dev_acert / qtde_remessa × 100
-    Sem giro = qtde_dev_acert == 0 e qtde_saldo > 0
-    """
     saldo = get_saldo_df(cod_gcon)
     if saldo.empty:
         return pd.DataFrame()
 
     produtos = get_produtos_df()
 
-    # Garante tipos numéricos
     for col in ["qtde_remessa", "qtde_dev_acert", "qtde_saldo", "valor_liquido", "valor_bruto"]:
         saldo[col] = pd.to_numeric(saldo[col], errors="coerce").fillna(0)
 
-    # Merge com base de produtos (enriquece com preço, curva, giro)
     if not produtos.empty:
-        produtos_slim = produtos[[
-            "isbn", "preco_venda", "curva", "cobertura_estoque",
-            "vendas_12m", "vendas_6m", "vendas_3m",
-            "status_publicacao", "editora", "area"
-        ]].copy()
-        saldo = saldo.merge(produtos_slim, on="isbn", how="left", suffixes=("", "_prod"))
+        cols_prod = [c for c in ["isbn", "preco_venda", "curva", "cobertura_estoque",
+                                  "vendas_12m", "vendas_6m", "vendas_3m",
+                                  "status_publicacao", "editora", "area"]
+                     if c in produtos.columns]
+        saldo = saldo.merge(produtos[cols_prod], on="isbn", how="left", suffixes=("", "_prod"))
 
-    # Métricas derivadas
-    saldo["pct_acerto"] = (saldo["qtde_dev_acert"] / saldo["qtde_remessa"].replace(0, 1) * 100).round(1)
+    saldo["pct_acerto"] = (
+        saldo["qtde_dev_acert"] / saldo["qtde_remessa"].replace(0, 1) * 100
+    ).round(1)
     saldo["sem_giro"] = (saldo["qtde_dev_acert"] == 0) & (saldo["qtde_saldo"] > 0)
-
-    # Dias em saldo (a partir da data de emissão)
     saldo["data_emissao"] = pd.to_datetime(saldo["data_emissao"], errors="coerce")
     saldo["dias_em_saldo"] = (pd.Timestamp.now() - saldo["data_emissao"]).dt.days
 
-    # Valor potencial de acerto (preço de venda × saldo)
     if "preco_venda" in saldo.columns:
-        saldo["valor_potencial"] = saldo["qtde_saldo"] * pd.to_numeric(saldo["preco_venda"], errors="coerce").fillna(0)
+        saldo["valor_potencial"] = (
+            saldo["qtde_saldo"] *
+            pd.to_numeric(saldo["preco_venda"], errors="coerce").fillna(0)
+        )
     else:
         saldo["valor_potencial"] = 0
 
@@ -628,7 +608,6 @@ def get_kpis(cod_gcon: str = None) -> dict:
             "valor_liquido_total": 0, "valor_potencial": 0,
             "titulos_sem_giro": 0, "clientes_sem_giro": 0,
         }
-
     return {
         "total_clientes": int(df["codigo_cliente"].nunique()),
         "total_titulos": int(df["isbn"].nunique()),
@@ -646,7 +625,6 @@ def get_kpis(cod_gcon: str = None) -> dict:
 
 
 def get_ranking_clientes(cod_gcon: str = None) -> pd.DataFrame:
-    """Ranking de clientes por volume e acerto."""
     df = get_analise_consignacao(cod_gcon)
     if df.empty:
         return pd.DataFrame()
@@ -658,29 +636,17 @@ def get_ranking_clientes(cod_gcon: str = None) -> pd.DataFrame:
         valor_liquido=("valor_liquido", "sum"),
         titulos=("isbn", "nunique"),
     ).reset_index()
-
     ranking["pct_acerto"] = (
         ranking["qtde_dev_acert"] / ranking["qtde_remessa"].replace(0, 1) * 100
     ).round(1)
-
     return ranking.sort_values("qtde_saldo", ascending=False)
 
 
 def get_faturamento_por_mes(cod_gcon: str = None) -> pd.DataFrame:
-    """
-    Faturamento mensal para gráfico de evolução.
-
-    Retorna colunas: mes, receita_total, receita_venda, receita_acerto_csg,
-                     qtde_total, clientes
-    - receita_total = Venda + Acerto Consignação
-    - receita_venda = somente tipo_tes == 'Venda'
-    - receita_acerto_csg = somente tipo_tes == 'Acerto Consignação'
-    """
     fat = get_faturamento_df(cod_gcon)
     if fat.empty:
         return pd.DataFrame()
 
-    # Usa data_nota (data da NF) ou data_emissao como fallback
     date_col = "data_nota" if "data_nota" in fat.columns else "data_emissao"
     fat[date_col] = pd.to_datetime(fat[date_col], errors="coerce")
     fat = fat.dropna(subset=[date_col])
@@ -689,71 +655,53 @@ def get_faturamento_por_mes(cod_gcon: str = None) -> pd.DataFrame:
     val_col = "valor_atendido" if "valor_atendido" in fat.columns else "valor_faturado"
     qty_col = "qtd_atendida" if "qtd_atendida" in fat.columns else "quantidade_faturada"
 
-    # Considera faturamento total = Venda + Acerto Consignação
-    fat_faturamento = fat[fat["tipo_tes"].isin(["Venda", "Acerto Consignação"])]
+    fat_fat = fat[fat["tipo_tes"].isin(["Venda", "Acerto Consignação"])]
 
-    mes_total = fat_faturamento.groupby("mes").agg(
+    mes_total = fat_fat.groupby("mes").agg(
         receita_total=(val_col, "sum"),
         qtde_total=(qty_col, "sum"),
         clientes=("codigo_cliente", "nunique"),
     ).reset_index()
 
-    # Separado por tipo
-    mes_venda = (fat_faturamento[fat_faturamento["tipo_tes"] == "Venda"]
-                 .groupby("mes")[[val_col]]
-                 .sum().rename(columns={val_col: "receita_venda"}).reset_index())
+    mes_venda = (fat_fat[fat_fat["tipo_tes"] == "Venda"]
+                 .groupby("mes")[[val_col]].sum()
+                 .rename(columns={val_col: "receita_venda"}).reset_index())
 
-    mes_acerto = (fat_faturamento[fat_faturamento["tipo_tes"] == "Acerto Consignação"]
-                  .groupby("mes")[[val_col]]
-                  .sum().rename(columns={val_col: "receita_acerto_csg"}).reset_index())
+    mes_acerto = (fat_fat[fat_fat["tipo_tes"] == "Acerto Consignação"]
+                  .groupby("mes")[[val_col]].sum()
+                  .rename(columns={val_col: "receita_acerto_csg"}).reset_index())
 
     result = mes_total.merge(mes_venda, on="mes", how="left")
     result = result.merge(mes_acerto, on="mes", how="left")
     result[["receita_venda", "receita_acerto_csg"]] = (
         result[["receita_venda", "receita_acerto_csg"]].fillna(0)
     )
-
     return result.sort_values("mes")
 
 
 def get_acerto_vs_faturamento(cod_gcon: str = None) -> pd.DataFrame:
-    """
-    Cruza saldo consignado com faturamento por cliente.
-    Compara o que foi consignado vs o que foi efetivamente faturado.
-    """
     saldo = get_saldo_df(cod_gcon)
-    fat = get_faturamento_df(cod_gcon)
+    fat = get_faturamento_df(cod_gcon, tipos_tes=["Venda", "Acerto Consignação"])
 
     if saldo.empty:
         return pd.DataFrame()
 
-    # Agrupa saldo por cliente
-    saldo_cli = saldo.groupby(["codigo_cliente", "razao_social"]).agg(
+    saldo_grp = saldo.groupby(["codigo_cliente", "razao_social"]).agg(
         qtde_remessa=("qtde_remessa", "sum"),
-        qtde_saldo=("qtde_saldo", "sum"),
         qtde_dev_acert=("qtde_dev_acert", "sum"),
-        valor_liquido=("valor_liquido", "sum"),
+        qtde_saldo=("qtde_saldo", "sum"),
     ).reset_index()
-
-    if not fat.empty:
-        # Agrupa faturamento por cliente
-        qty_col = "qtd_atendida" if "qtd_atendida" in fat.columns else "quantidade_faturada"
-        val_col = "valor_atendido" if "valor_atendido" in fat.columns else "valor_faturado"
-        fat_cli = fat.groupby("codigo_cliente").agg(
-            qtde_faturada=(qty_col, "sum"),
-            valor_faturado=(val_col, "sum"),
-        ).reset_index()
-
-        merged = saldo_cli.merge(fat_cli, on="codigo_cliente", how="left")
-    else:
-        merged = saldo_cli.copy()
-        merged["qtde_faturada"] = 0
-        merged["valor_faturado"] = 0.0
-
-    merged["qtde_faturada"] = merged["qtde_faturada"].fillna(0)
-    merged["valor_faturado"] = merged["valor_faturado"].fillna(0.0)
-    merged["pct_acerto"] = (
-        merged["qtde_dev_acert"] / merged["qtde_remessa"].replace(0, 1) * 100
+    saldo_grp["pct_acerto"] = (
+        saldo_grp["qtde_dev_acert"] / saldo_grp["qtde_remessa"].replace(0, 1) * 100
     ).round(1)
 
-    return merged
+    if fat.empty:
+        saldo_grp["receita_total"] = 0
+        return saldo_grp
+
+    val_col = "valor_atendido" if "valor_atendido" in fat.columns else "valor_faturado"
+    fat_grp = fat.groupby("codigo_cliente")[[val_col]].sum().rename(
+        columns={val_col: "receita_total"}
+    ).reset_index()
+
+    return saldo_grp.merge(fat_grp, on="codigo_cliente", how="left").fillna({"receita_total": 0})
