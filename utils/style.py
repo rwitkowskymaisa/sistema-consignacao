@@ -279,16 +279,21 @@ hr {{
 #MainMenu, footer, header {{ visibility: hidden; }}
 .stDeployButton {{ display: none; }}
 
-/* ── Sidebar sempre visível — esconde botão de recolher ── */
-button[data-testid="collapsedControl"],
+/* ── Sidebar sempre visível (fixa, sem colapso) ── */
+section[data-testid="stSidebar"] {{
+    transform: translateX(0px) !important;
+    min-width: 230px !important;
+    max-width: 230px !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}}
+/* Esconde os botões de recolher/expandir */
 [data-testid="stSidebarCollapseButton"] {{
     display: none !important;
 }}
-section[data-testid="stSidebar"] {{
-    transform: none !important;
-    visibility: visible !important;
-    width: 230px !important;
-    min-width: 230px !important;
+[data-testid="collapsedControl"] {{
+    display: none !important;
 }}
 
 /* ── Ocultar rótulo "app" e separadores do menu lateral ── */
@@ -359,7 +364,25 @@ def kpi_card(label: str, valor: str, sub: str = "", cor: str = "") -> str:
     """
 
 
+_JS_SIDEBAR = """
+<script>
+(function() {
+    function forceSidebar() {
+        // Clica no botão expandir se a sidebar estiver colapsada
+        var btn = window.parent.document.querySelector('[data-testid="collapsedControl"]');
+        if (btn) { btn.click(); }
+        // Remove transform inline que colapsa a sidebar
+        var sb = window.parent.document.querySelector('section[data-testid="stSidebar"]');
+        if (sb) { sb.style.transform = 'translateX(0px)'; }
+    }
+    setTimeout(forceSidebar, 200);
+    setTimeout(forceSidebar, 600);
+})();
+</script>
+"""
+
 def apply_theme():
     """Aplica o CSS global — chamar no início de cada página."""
     import streamlit as st
     st.markdown(CSS_GLOBAL, unsafe_allow_html=True)
+    st.components.v1.html(_JS_SIDEBAR, height=0)
