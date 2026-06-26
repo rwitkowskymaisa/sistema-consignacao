@@ -334,8 +334,8 @@ def sidebar_footer(usuario: dict):
     """, unsafe_allow_html=True)
 
     if st.sidebar.button("🚪 Sair", key="btn_sair_sidebar"):
-        st.session_state.usuario = None
-        st.rerun()
+        from utils.auth import logout
+        logout()
 
 
 def page_header(titulo: str, subtitulo: str = "", icone: str = ""):

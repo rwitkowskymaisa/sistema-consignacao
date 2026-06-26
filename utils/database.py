@@ -217,6 +217,13 @@ def init_db():
             observacao TEXT,
             reenviado INTEGER DEFAULT 0
         )""",
+        # SESSÕES (persistência de login)
+        f"""CREATE TABLE IF NOT EXISTS sessoes (
+            token TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            criado_em TEXT,
+            expira_em TEXT
+        )""",
     ]
 
     with eng.connect() as conn:
@@ -230,6 +237,66 @@ def init_db():
             _insert_user_conn(conn, "Administrador", "admin@empresa.com",
                               "admin", "admin123", "admin")
             conn.commit()
+
+
+# ─── SESSÕES ──────────────────────────────────────────────────────────────────
+
+def criar_sessao(username: str) -> str:
+    """Gera token de sessão persistente (7 dias)."""
+    from datetime import timedelta
+    token   = secrets.token_urlsafe(32)
+    criado  = datetime.now().isoformat()
+    expira  = (datetime.now() + timedelta(days=7)).isoformat()
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "INSERT INTO sessoes (token, username, criado_em, expira_em) VALUES (:t, :u, :c, :e)",
+            {"t": token, "u": username, "c": criado, "e": expira}
+        )
+        conn.commit()
+    return token
+
+
+def validar_sessao(token: str):
+    """Valida token e retorna usuário ou None."""
+    if not token:
+        return None
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = _exec(conn,
+                "SELECT username, expira_em FROM sessoes WHERE token = :t",
+                {"t": token}
+            ).fetchone()
+            if not row:
+                return None
+            row = dict(row._mapping)
+            try:
+                from datetime import datetime as dt
+                if dt.fromisoformat(str(row["expira_em"])) < dt.now():
+                    return None
+            except Exception:
+                pass
+            user = _exec(conn,
+                "SELECT * FROM usuarios WHERE username = :u AND ativo = 1",
+                {"u": row["username"]}
+            ).fetchone()
+            return dict(user._mapping) if user else None
+    except Exception:
+        return None
+
+
+def deletar_sessao(token: str):
+    """Remove sessão do banco."""
+    if not token:
+        return
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            _exec(conn, "DELETE FROM sessoes WHERE token = :t", {"t": token})
+            conn.commit()
+    except Exception:
+        pass
 
 
 # ─── USUÁRIOS ─────────────────────────────────────────────────────────────────
