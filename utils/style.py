@@ -279,6 +279,18 @@ hr {{
 #MainMenu, footer, header {{ visibility: hidden; }}
 .stDeployButton {{ display: none; }}
 
+/* ── Sidebar sempre visível — esconde botão de recolher ── */
+button[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] {{
+    display: none !important;
+}}
+section[data-testid="stSidebar"] {{
+    transform: none !important;
+    visibility: visible !important;
+    width: 230px !important;
+    min-width: 230px !important;
+}}
+
 /* ── Ocultar rótulo "app" e separadores do menu lateral ── */
 section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] span,
 section[data-testid="stSidebar"] .st-emotion-cache-1rtdyuf,
