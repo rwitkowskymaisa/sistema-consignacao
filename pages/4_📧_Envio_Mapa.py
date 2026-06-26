@@ -16,9 +16,11 @@ from utils.database import (
 )
 from utils.email_service import build_mapa_email_html, send_email_graph
 from utils.mapa_generator import gerar_mapa_excel
+from utils.style import apply_theme, sidebar_header, sidebar_footer
 
 st.set_page_config(page_title="Envio Mapa · Consignação", page_icon="📧", layout="wide")
 init_db()
+apply_theme()
 
 if "usuario" not in st.session_state or not st.session_state.usuario:
     st.warning("⚠️ Faça login para acessar esta página.")
@@ -28,22 +30,19 @@ usuario = st.session_state.usuario
 is_admin = usuario["papel"] == "admin"
 gcon_filter = None if is_admin else usuario.get("cod_gcon")
 
-st.markdown("""
-<style>
-.stApp { background: #0f172a; color: #e2e8f0; }
-section[data-testid="stSidebar"] { background: #1e293b !important; }
-</style>
-""", unsafe_allow_html=True)
-
+sidebar_header(usuario)
 with st.sidebar:
-    st.markdown(f"**👤 {usuario['nome']}**")
-    st.markdown(f"`{usuario['papel'].upper()}`")
-    st.divider()
-    if st.button("🚪 Sair"):
-        st.session_state.usuario = None
-        st.rerun()
+    st.markdown('<div class="sidebar-section">Envio</div>', unsafe_allow_html=True)
+sidebar_footer(usuario)
 
-st.title("📧 Envio do Mapa de Consignação")
+st.markdown("""
+<div class="page-header">
+  <div>
+    <div class="page-title">📧 Envio do Mapa de Consignação</div>
+    <div class="page-subtitle">Gere e envie o mapa mensal para cada cliente</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ─── CONFIGURAÇÃO DE EMAIL ────────────────────────────────────────────────────
 with st.expander("⚙️ Configuração de Email (Outlook/M365)", expanded=False):
@@ -70,7 +69,6 @@ AZURE_CLIENT_SECRET = "seu-client-secret"
 AZURE_TENANT_ID     = "seu-tenant-id"
 """, language="toml")
 
-st.divider()
 
 # ─── SELEÇÃO DE MÊS E REMETENTE ──────────────────────────────────────────────
 col_conf1, col_conf2 = st.columns([1, 2])

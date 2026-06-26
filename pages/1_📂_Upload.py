@@ -12,9 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import upsert_produtos, upsert_saldo_consignado, upsert_faturamento, upsert_tes, init_db
+from utils.style import apply_theme, sidebar_header, sidebar_footer
 
 st.set_page_config(page_title="Upload · Consignação", page_icon="📂", layout="wide")
 init_db()
+apply_theme()
 
 if "usuario" not in st.session_state or not st.session_state.usuario:
     st.warning("⚠️ Faça login para acessar esta página.")
@@ -23,28 +25,23 @@ if "usuario" not in st.session_state or not st.session_state.usuario:
 usuario = st.session_state.usuario
 is_admin = usuario["papel"] == "admin"
 
-st.markdown("""
-<style>
-.stApp { background: #0f172a; color: #e2e8f0; }
-section[data-testid="stSidebar"] { background: #1e293b !important; }
-.stExpander { background: #1e293b !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 10px !important; }
-</style>
-""", unsafe_allow_html=True)
-
+sidebar_header(usuario)
 with st.sidebar:
-    st.markdown(f"**👤 {usuario['nome']}**")
-    st.markdown(f"`{usuario['papel'].upper()}`")
-    st.divider()
-    if st.button("🚪 Sair"):
-        st.session_state.usuario = None
-        st.rerun()
+    st.markdown('<div class="sidebar-section">Importação</div>', unsafe_allow_html=True)
+sidebar_footer(usuario)
 
-st.title("📂 Upload de Arquivos")
-st.markdown("Importe os arquivos Excel para atualizar a base de dados do sistema.")
+st.markdown("""
+<div class="page-header">
+  <div>
+    <div class="page-title">📂 Upload de Arquivos</div>
+    <div class="page-subtitle">Importe os arquivos Excel para atualizar a base de dados</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 if not is_admin:
     st.info(f"Seus dados serão vinculados ao Gcon: **{usuario.get('cod_gcon') or 'não configurado'}**")
 
-st.divider()
+st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
 
 
 def preview_df(df, n=5):

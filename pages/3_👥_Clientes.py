@@ -13,9 +13,11 @@ from utils.database import (
     get_clientes, update_cliente_email,
     get_status_envio_mes, init_db
 )
+from utils.style import apply_theme, sidebar_header, sidebar_footer
 
 st.set_page_config(page_title="Clientes · Consignação", page_icon="👥", layout="wide")
 init_db()
+apply_theme()
 
 if "usuario" not in st.session_state or not st.session_state.usuario:
     st.warning("⚠️ Faça login para acessar esta página.")
@@ -25,39 +27,28 @@ usuario = st.session_state.usuario
 is_admin = usuario["papel"] == "admin"
 vend_filter = None if is_admin else usuario["username"]
 
-st.markdown("""
-<style>
-.stApp { background: #0f172a; color: #e2e8f0; }
-section[data-testid="stSidebar"] { background: #1e293b !important; }
-.status-ok    { color: #34d399; font-weight: 600; }
-.status-pend  { color: #f59e0b; font-weight: 600; }
-.status-wait  { color: #60a5fa; font-weight: 600; }
-</style>
-""", unsafe_allow_html=True)
-
+sidebar_header(usuario)
 with st.sidebar:
-    st.markdown(f"**👤 {usuario['nome']}**")
-    st.markdown(f"`{usuario['papel'].upper()}`")
-    st.divider()
-
+    st.markdown('<div class="sidebar-section">Filtros</div>', unsafe_allow_html=True)
     mes_sel = st.selectbox(
         "Mês de referência",
         pd.date_range(end=datetime.now(), periods=12, freq="MS").strftime("%Y-%m").tolist()[::-1]
     )
-
     filtro_status = st.multiselect(
         "Filtrar por status",
         ["Não enviado", "Enviado", "Aguardando retorno"],
         default=[]
     )
+sidebar_footer(usuario)
 
-    st.divider()
-    if st.button("🚪 Sair"):
-        st.session_state.usuario = None
-        st.rerun()
-
-st.title("👥 Clientes")
-st.caption(f"Referência: **{mes_sel}** · {usuario['nome']}")
+st.markdown(f"""
+<div class="page-header">
+  <div>
+    <div class="page-title">👥 Clientes</div>
+    <div class="page-subtitle">Referência: {mes_sel} · {usuario['nome']}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ─── STATUS DE ENVIO DO MÊS ──────────────────────────────────────────────────
 df_status = get_status_envio_mes(vend_filter)

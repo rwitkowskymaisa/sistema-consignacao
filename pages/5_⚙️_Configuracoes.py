@@ -12,9 +12,11 @@ from utils.database import (
     get_all_users, create_user, update_user_password,
     toggle_user_active, init_db
 )
+from utils.style import apply_theme, sidebar_header, sidebar_footer
 
 st.set_page_config(page_title="Configurações · Consignação", page_icon="⚙️", layout="wide")
 init_db()
+apply_theme()
 
 if "usuario" not in st.session_state or not st.session_state.usuario:
     st.warning("⚠️ Faça login para acessar esta página.")
@@ -23,29 +25,19 @@ if "usuario" not in st.session_state or not st.session_state.usuario:
 usuario = st.session_state.usuario
 is_admin = usuario["papel"] == "admin"
 
-st.markdown("""
-<style>
-.stApp { background: #0f172a; color: #e2e8f0; }
-section[data-testid="stSidebar"] { background: #1e293b !important; }
-.info-card {
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px;
-    padding: 20px 22px;
-    margin-bottom: 16px;
-}
-</style>
-""", unsafe_allow_html=True)
-
+sidebar_header(usuario)
 with st.sidebar:
-    st.markdown(f"**👤 {usuario['nome']}**")
-    st.markdown(f"`{usuario['papel'].upper()}`")
-    st.divider()
-    if st.button("🚪 Sair"):
-        st.session_state.usuario = None
-        st.rerun()
+    st.markdown('<div class="sidebar-section">Sistema</div>', unsafe_allow_html=True)
+sidebar_footer(usuario)
 
-st.title("⚙️ Configurações")
+st.markdown("""
+<div class="page-header">
+  <div>
+    <div class="page-title">⚙️ Configurações</div>
+    <div class="page-subtitle">Usuários, email, deploy e conta</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 tabs = st.tabs(["👤 Usuários", "📧 Email / Azure", "🚀 Deploy", "🔒 Minha Conta"])
 
