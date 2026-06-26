@@ -99,31 +99,14 @@ def do_login(username: str, password: str):
     user = authenticate(username.strip(), password)
     if user:
         st.session_state.usuario = user
-        st.rerun()
+        st.switch_page("pages/2_📊_Dashboard.py")
     else:
         st.error("Usuário ou senha incorretos.")
 
 
-# Se já logado
+# Se já logado, redireciona direto para o Dashboard
 if st.session_state.usuario:
-    u = st.session_state.usuario
-    st.markdown(f"""
-    <div style="text-align:center;padding:80px 0;">
-        <div style="font-size:48px;margin-bottom:16px;">✅</div>
-        <div style="font-size:20px;font-weight:700;color:#F9FAFB;">
-            Bem-vindo, {u['nome']}!
-        </div>
-        <div style="font-size:14px;color:#9CA3AF;margin-top:8px;">
-            Use o menu lateral para navegar pelo sistema.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([2, 1, 2])
-    with col2:
-        if st.button("🚪 Sair"):
-            st.session_state.usuario = None
-            st.rerun()
-    st.stop()
+    st.switch_page("pages/2_📊_Dashboard.py")
 
 # ── Tela de login ─────────────────────────────────────────────────────────────
 # Logo centralizado acima do card
