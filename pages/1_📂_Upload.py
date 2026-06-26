@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import upsert_produtos, upsert_saldo_consignado, upsert_faturamento, upsert_tes, init_db
 from utils.style import apply_theme, sidebar_header, sidebar_footer
 
-st.set_page_config(page_title="Upload · Consignação", page_icon="📂", layout="wide")
+st.set_page_config(page_title="Upload · Consignação", page_icon="📂", layout="wide",
+                   initial_sidebar_state="expanded")
 init_db()
 apply_theme()
 

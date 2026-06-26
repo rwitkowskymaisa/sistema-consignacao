@@ -14,7 +14,8 @@ from utils.database import (
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer
 
-st.set_page_config(page_title="Configurações · Consignação", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Configurações · Consignação", page_icon="⚙️", layout="wide",
+                   initial_sidebar_state="expanded")
 init_db()
 apply_theme()
 
