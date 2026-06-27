@@ -296,6 +296,34 @@ section[data-testid="stSidebar"] {{
     display: none !important;
 }}
 
+/* ── Links de navegação (page_link) ── */
+section[data-testid="stSidebar"] [data-testid="stPageLink"] {{
+    background: transparent !important;
+    border-radius: 6px !important;
+    margin: 1px 8px !important;
+    padding: 6px 10px !important;
+    display: flex !important;
+    align-items: center !important;
+    transition: background 0.15s !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stPageLink"]:hover {{
+    background: rgba(255,255,255,0.08) !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stPageLink"] p {{
+    color: #D1D5DB !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    margin: 0 !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stPageLink"][aria-current="page"] {{
+    background: rgba(0,169,157,0.15) !important;
+    border-left: 3px solid {COR_TEAL} !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stPageLink"][aria-current="page"] p {{
+    color: {COR_TEAL} !important;
+    font-weight: 600 !important;
+}}
+
 /* ── Ocultar rótulo "app" e separadores do menu lateral ── */
 section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] span,
 section[data-testid="stSidebar"] .st-emotion-cache-1rtdyuf,
@@ -372,12 +400,23 @@ section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
 
 
 def sidebar_header(usuario: dict):
-    """Logo no topo da sidebar."""
+    """Logo + navegação no topo da sidebar."""
     import streamlit as st
+
     st.sidebar.markdown(
         f'<div class="sidebar-logo">{LOGO_SVG}</div>',
         unsafe_allow_html=True
     )
+    st.sidebar.markdown(
+        '<div class="sidebar-section">Menu</div>',
+        unsafe_allow_html=True
+    )
+    st.sidebar.page_link("pages/2_📊_Dashboard.py",  label="📊  Dashboard")
+    st.sidebar.page_link("pages/1_📂_Upload.py",     label="📂  Upload de Arquivos")
+    st.sidebar.page_link("pages/3_👥_Clientes.py",   label="👥  Clientes")
+    st.sidebar.page_link("pages/4_📧_Envio_Mapa.py", label="📧  Envio do Mapa")
+    if usuario.get("papel") == "admin":
+        st.sidebar.page_link("pages/5_⚙️_Configuracoes.py", label="⚙️  Configurações")
 
 
 def sidebar_footer(usuario: dict):

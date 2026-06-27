@@ -665,6 +665,36 @@ def get_analise_consignacao(cod_gcon: str = None) -> pd.DataFrame:
     return saldo
 
 
+def get_ultima_atualizacao() -> dict:
+    """Retorna data/hora da última importação de cada tabela."""
+    eng = get_engine()
+    resultado = {}
+    tabelas = {
+        "produtos":         "produtos",
+        "saldo_consignado": "saldo_consignado",
+        "faturamento":      "faturamento",
+        "tabela_tes":       "tabela_tes",
+    }
+    with eng.connect() as conn:
+        for chave, tabela in tabelas.items():
+            try:
+                row = _exec(conn,
+                    f"SELECT MAX(upload_em) as ult FROM {tabela}"
+                ).fetchone()
+                val = dict(row._mapping)["ult"] if row else None
+                resultado[chave] = str(val) if val else None
+            except Exception:
+                resultado[chave] = None
+        # Contagens
+        for chave, tabela in tabelas.items():
+            try:
+                row = _exec(conn, f"SELECT COUNT(*) as n FROM {tabela}").fetchone()
+                resultado[f"{chave}_count"] = dict(row._mapping)["n"]
+            except Exception:
+                resultado[f"{chave}_count"] = 0
+    return resultado
+
+
 def get_kpis(cod_gcon: str = None) -> dict:
     df = get_analise_consignacao(cod_gcon)
     if df.empty:
