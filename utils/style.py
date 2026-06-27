@@ -303,15 +303,77 @@ section[data-testid="stSidebar"] .st-emotion-cache-6tkfeg,
 section[data-testid="stSidebar"] p.st-emotion-cache-pkbazv {{
     display: none !important;
 }}
+
+/* ── Sidebar — layout flex coluna para empurrar footer ao fundo ── */
+section[data-testid="stSidebar"] > div:first-child {{
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+    padding-bottom: 0 !important;
+}}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+}}
+
+/* ── Rodapé fixo da sidebar ── */
+.sidebar-footer {{
+    margin-top: auto !important;
+    padding: 12px 16px 16px 16px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}}
+.sidebar-version {{
+    font-size: 10px;
+    color: #4B5563;
+    margin-top: 6px;
+    letter-spacing: 0.05em;
+}}
+
+/* ── Cabeçalho com filtros inline ── */
+.page-header {{
+    background: {COR_CARD};
+    border-bottom: 1px solid {COR_BORDA};
+    padding: 12px 24px;
+    margin: -16px -16px 20px -16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}}
+.page-title {{
+    font-size: 18px;
+    font-weight: 700;
+    color: {COR_TEXTO};
+    white-space: nowrap;
+}}
+.page-subtitle {{
+    font-size: 12px;
+    color: {COR_CINZA};
+    margin-top: 1px;
+}}
+
+/* ── Selectbox compacto no cabeçalho ── */
+.header-filters .stSelectbox > div > div {{
+    padding: 4px 10px !important;
+    font-size: 13px !important;
+    min-height: 34px !important;
+}}
+.header-filters label {{
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    color: {COR_CINZA} !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+    margin-bottom: 2px !important;
+}}
 </style>
 """
 
 
 def sidebar_header(usuario: dict):
-    """Renderiza cabeçalho da sidebar com logo e info do usuário."""
+    """Logo no topo da sidebar."""
     import streamlit as st
-
-    # Logo sem div aninhado para evitar tag solta
     st.sidebar.markdown(
         f'<div class="sidebar-logo">{LOGO_SVG}</div>',
         unsafe_allow_html=True
@@ -319,19 +381,26 @@ def sidebar_header(usuario: dict):
 
 
 def sidebar_footer(usuario: dict):
-    """Renderiza rodapé da sidebar com usuário e botão sair."""
+    """Perfil + versão + botão Sair no rodapé da sidebar."""
     import streamlit as st
 
-    st.sidebar.markdown("<hr style='border-color:rgba(255,255,255,0.08);margin:8px 0;'>",
-                        unsafe_allow_html=True)
+    # Espaçador para empurrar o footer para baixo
+    st.sidebar.markdown(
+        "<div style='flex:1;'></div>",
+        unsafe_allow_html=True
+    )
+
     st.sidebar.markdown(f"""
-    <div class="sidebar-user">
-        <div style="font-size:13px;color:#F9FAFB;font-weight:600;">{usuario['nome']}</div>
-        <div style="margin-top:4px;">
-            <span class="sidebar-badge">{usuario['papel']}</span>
-        </div>
+<div class="sidebar-footer">
+    <div style="font-size:13px;color:#F9FAFB;font-weight:600;margin-bottom:4px;">
+        {usuario['nome']}
     </div>
-    """, unsafe_allow_html=True)
+    <div>
+        <span class="sidebar-badge">{usuario['papel']}</span>
+    </div>
+    <div class="sidebar-version">v.001 · Artmed Consignação</div>
+</div>
+""", unsafe_allow_html=True)
 
     if st.sidebar.button("🚪 Sair", key="btn_sair_sidebar"):
         from utils.auth import logout
