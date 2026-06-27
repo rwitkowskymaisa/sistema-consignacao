@@ -35,54 +35,61 @@ CHART = dict(plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
              title_font_size=14)
 GRID  = dict(gridcolor="#F3F4F6", zerolinecolor="#E5E7EB")
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+# ─── SIDEBAR — só logo e footer ───────────────────────────────────────────────
 sidebar_header(usuario)
-
-with st.sidebar:
-    st.markdown('<div class="sidebar-section">Filtros</div>', unsafe_allow_html=True)
-
-    if is_admin:
-        vendedores = [u for u in get_all_users() if u["papel"] == "vendedor" and u["ativo"]]
-        opts_gcon  = ["Todos os vendedores"] + [
-            f"{v['nome']} ({v['cod_gcon'] or '—'})" for v in vendedores
-        ]
-        sel_vend = st.selectbox("Vendedor", opts_gcon)
-        if sel_vend != "Todos os vendedores":
-            gcon_filter = next(
-                (v["cod_gcon"] for v in vendedores
-                 if f"{v['nome']} ({v['cod_gcon'] or '—'})" == sel_vend), None
-            )
-
-    clientes  = get_clientes(gcon_filter)
-    opts_cli  = ["Todos os clientes"] + [
-        f"{c['razao_social'][:32]} [{c['codigo_cliente']}]" for c in clientes
-    ]
-    sel_cli    = st.selectbox("Cliente (drill-down)", opts_cli)
-    cliente_sel = None
-    if sel_cli != "Todos os clientes":
-        cliente_sel = sel_cli.split("[")[-1].rstrip("]")
-
 sidebar_footer(usuario)
 
 # ─── DADOS ────────────────────────────────────────────────────────────────────
 with st.spinner("Carregando dados..."):
+    clientes   = get_clientes(gcon_filter)
     kpis       = get_kpis(gcon_filter)
     df_full    = get_analise_consignacao(gcon_filter)
     df_rank    = get_ranking_clientes(gcon_filter)
     df_fat_mes = get_faturamento_por_mes(gcon_filter)
 
-# ─── CABEÇALHO ────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div class="page-header">
-  <div>
-    <div class="page-title">Dashboard Geral</div>
-    <div class="page-subtitle">
-        {usuario['nome']} &nbsp;·&nbsp;
-        Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}
+# ─── CABEÇALHO COM FILTROS ─────────────────────────────────────────────────────
+# Linha do cabeçalho: título à esquerda, filtros à direita
+if is_admin:
+    col_title, col_vend, col_cli = st.columns([3, 1.5, 2])
+else:
+    col_title, col_cli = st.columns([3.5, 2])
+
+with col_title:
+    st.markdown(f"""
+    <div style="padding:8px 0 0 0;">
+      <div class="page-title">Dashboard Geral</div>
+      <div class="page-subtitle">
+          {usuario['nome']} &nbsp;·&nbsp;
+          Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}
+      </div>
     </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+if is_admin:
+    with col_vend:
+        vendedores = [u for u in get_all_users() if u["papel"] == "vendedor" and u["ativo"]]
+        opts_gcon  = ["Todos os vendedores"] + [
+            f"{v['nome']} ({v['cod_gcon'] or '—'})" for v in vendedores
+        ]
+        sel_vend = st.selectbox("Vendedor", opts_gcon, label_visibility="visible")
+        if sel_vend != "Todos os vendedores":
+            gcon_filter = next(
+                (v["cod_gcon"] for v in vendedores
+                 if f"{v['nome']} ({v['cod_gcon'] or '—'})" == sel_vend), None
+            )
+            clientes = get_clientes(gcon_filter)
+
+opts_cli  = ["Todos os clientes"] + [
+    f"{c['razao_social'][:28]} [{c['codigo_cliente']}]" for c in clientes
+]
+with col_cli:
+    sel_cli = st.selectbox("Cliente (drill-down)", opts_cli, label_visibility="visible")
+
+cliente_sel = None
+if sel_cli != "Todos os clientes":
+    cliente_sel = sel_cli.split("[")[-1].rstrip("]")
+
+st.markdown("<hr style='margin:8px 0 16px 0;border-color:#E5E7EB;'>", unsafe_allow_html=True)
 
 # ─── KPIs ─────────────────────────────────────────────────────────────────────
 pct = kpis["pct_acerto_medio"]
