@@ -358,15 +358,31 @@ with col1:
 
             fig_fat = go.Figure()
             if "receita_venda" in df_fat_mes_plot.columns:
-                fig_fat.add_trace(go.Bar(name="Venda",
-                                         x=df_fat_mes_plot["mes_label"],
-                                         y=df_fat_mes_plot["receita_venda"],
-                                         marker_color="#3B82F6"))
+                fig_fat.add_trace(go.Bar(
+                    name="Venda",
+                    x=df_fat_mes_plot["mes_label"],
+                    y=df_fat_mes_plot["receita_venda"],
+                    marker_color="#3B82F6",
+                    text=df_fat_mes_plot["receita_venda"].apply(
+                        lambda v: f"R$ {v/1e6:.1f}M" if v >= 1e6 else f"R$ {v/1e3:.0f}k" if v >= 1e3 else f"R$ {v:.0f}"
+                    ),
+                    textposition="inside",
+                    textfont=dict(color="white", size=11),
+                    insidetextanchor="middle",
+                ))
             if "receita_acerto_csg" in df_fat_mes_plot.columns:
-                fig_fat.add_trace(go.Bar(name="Acerto Consignação",
-                                         x=df_fat_mes_plot["mes_label"],
-                                         y=df_fat_mes_plot["receita_acerto_csg"],
-                                         marker_color=COR_TEAL))
+                fig_fat.add_trace(go.Bar(
+                    name="Acerto Consignação",
+                    x=df_fat_mes_plot["mes_label"],
+                    y=df_fat_mes_plot["receita_acerto_csg"],
+                    marker_color=COR_TEAL,
+                    text=df_fat_mes_plot["receita_acerto_csg"].apply(
+                        lambda v: f"R$ {v/1e6:.1f}M" if v >= 1e6 else f"R$ {v/1e3:.0f}k" if v >= 1e3 else (f"R$ {v:.0f}" if v > 0 else "")
+                    ),
+                    textposition="inside",
+                    textfont=dict(color="white", size=11),
+                    insidetextanchor="middle",
+                ))
             fig_fat.update_layout(
                 **CHART,
                 title="Faturamento  ·  clique em um mês para ver dia a dia",
