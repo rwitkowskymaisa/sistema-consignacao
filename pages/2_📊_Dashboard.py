@@ -290,58 +290,90 @@ if df_full.empty:
     st.info("Sem dados. Acesse **Upload** para importar os arquivos.")
     st.stop()
 
-# ─── GRÁFICO: FATURAMENTO ─────────────────────────────────────────────────────
+# ─── GRÁFICOS: FATURAMENTO + PARTICIPAÇÃO POR CLIENTE ────────────────────────
 col1, col2 = st.columns(2)
 
 with col1:
-    if not df_fat_mes_plot.empty:
-        fig_fat = go.Figure()
-        if "receita_venda" in df_fat_mes_plot.columns:
-            fig_fat.add_trace(go.Bar(name="Venda",
-                                     x=df_fat_mes_plot["mes_label"],
-                                     y=df_fat_mes_plot["receita_venda"],
-                                     marker_color="#3B82F6"))
-        if "receita_acerto_csg" in df_fat_mes_plot.columns:
-            fig_fat.add_trace(go.Bar(name="Acerto Consignação",
-                                     x=df_fat_mes_plot["mes_label"],
-                                     y=df_fat_mes_plot["receita_acerto_csg"],
-                                     marker_color=COR_TEAL))
-        fig_fat.update_layout(
-            **CHART,
-            title="Faturamento",
-            barmode="stack",
-            xaxis=dict(tickangle=-30, type="category", **GRID),
-            yaxis=dict(title="R$", **GRID),
-            legend=dict(orientation="h", y=1.08),
-            height=340,
-            margin=dict(t=40, b=10, l=10, r=10),
-        )
-        event_fat = st.plotly_chart(fig_fat, use_container_width=True,
-                                     on_select="rerun", selection_mode="points",
-                                     key="fat_mes_chart")
-        # Captura mês clicado
-        try:
-            pts = []
-            if event_fat is not None:
-                sel = getattr(event_fat, "selection", {})
-                pts = (sel.get("points", []) if isinstance(sel, dict)
-                       else list(getattr(sel, "points", [])))
-            if pts:
-                pt    = pts[0]
-                x_val = pt.get("x") if isinstance(pt, dict) else getattr(pt, "x", None)
-                if x_val:
-                    st.session_state.fat_mes_sel = str(x_val)
-        except Exception:
-            pass
+    mes_sel = st.session_state.fat_mes_sel
 
-        if st.session_state.fat_mes_sel:
-            st.caption(f"📅 Drill-down ativo: **{st.session_state.fat_mes_sel}** — "
-                       "clique em outro mês para mudar")
-            if st.button("✕ Fechar drill-down", key="btn_close_dd"):
+    # ── VISÃO DRILL-DOWN: dia a dia ───────────────────────────────────────────
+    if mes_sel and not df_fat_filt.empty:
+        df_dia = df_fat_filt[df_fat_filt["mes_label"] == mes_sel].copy()
+        if not df_dia.empty:
+            df_dia["data_str"]  = df_dia[DATE_COL].dt.strftime("%Y-%m-%d")
+            df_dia["dia_label"] = df_dia[DATE_COL].dt.strftime("%d/%m")
+            df_dia_grp = (df_dia.groupby(["data_str", "dia_label", "tipo_tes"])["valor_atendido"]
+                          .sum().reset_index().sort_values("data_str"))
+            tickvals = df_dia_grp["data_str"].unique().tolist()
+            lbl_map  = df_dia_grp.drop_duplicates("data_str").set_index("data_str")["dia_label"]
+            ticktext = [lbl_map.get(v, v) for v in tickvals]
+            fig_dia = px.bar(df_dia_grp, x="data_str", y="valor_atendido", color="tipo_tes",
+                             title=f"Faturamento dia a dia — {mes_sel}",
+                             labels={"data_str": "Data", "valor_atendido": "R$", "tipo_tes": "Tipo"},
+                             color_discrete_map={"Venda": "#3B82F6", "Acerto Consignação": COR_TEAL},
+                             text_auto=".2s")
+            fig_dia.update_layout(
+                **CHART,
+                barmode="stack",
+                xaxis=dict(tickangle=-45, tickvals=tickvals, ticktext=ticktext,
+                           type="category", **GRID),
+                yaxis=dict(title="R$", **GRID),
+                legend=dict(orientation="h", y=1.08),
+                height=340,
+                margin=dict(t=40, b=10, l=10, r=10),
+            )
+            st.plotly_chart(fig_dia, use_container_width=True)
+            if st.button("← Voltar ao faturamento mensal", key="btn_close_dd"):
                 st.session_state.fat_mes_sel = None
                 st.rerun()
+        else:
+            st.session_state.fat_mes_sel = None
+            st.rerun()
+
+    # ── VISÃO MENSAL (padrão) ─────────────────────────────────────────────────
     else:
-        st.info("Sem dados de faturamento. Importe o arquivo de Faturamento.")
+        if not df_fat_mes_plot.empty:
+            fig_fat = go.Figure()
+            if "receita_venda" in df_fat_mes_plot.columns:
+                fig_fat.add_trace(go.Bar(name="Venda",
+                                         x=df_fat_mes_plot["mes_label"],
+                                         y=df_fat_mes_plot["receita_venda"],
+                                         marker_color="#3B82F6"))
+            if "receita_acerto_csg" in df_fat_mes_plot.columns:
+                fig_fat.add_trace(go.Bar(name="Acerto Consignação",
+                                         x=df_fat_mes_plot["mes_label"],
+                                         y=df_fat_mes_plot["receita_acerto_csg"],
+                                         marker_color=COR_TEAL))
+            fig_fat.update_layout(
+                **CHART,
+                title="Faturamento  ·  clique em um mês para ver dia a dia",
+                barmode="stack",
+                xaxis=dict(tickangle=-30, type="category", **GRID),
+                yaxis=dict(title="R$", **GRID),
+                legend=dict(orientation="h", y=1.08),
+                height=340,
+                margin=dict(t=40, b=10, l=10, r=10),
+            )
+            event_fat = st.plotly_chart(fig_fat, use_container_width=True,
+                                         on_select="rerun", selection_mode="points",
+                                         key="fat_mes_chart")
+            # Captura mês clicado
+            try:
+                pts = []
+                if event_fat is not None:
+                    sel = getattr(event_fat, "selection", {})
+                    pts = (sel.get("points", []) if isinstance(sel, dict)
+                           else list(getattr(sel, "points", [])))
+                if pts:
+                    pt    = pts[0]
+                    x_val = pt.get("x") if isinstance(pt, dict) else getattr(pt, "x", None)
+                    if x_val:
+                        st.session_state.fat_mes_sel = str(x_val)
+                        st.rerun()
+            except Exception:
+                pass
+        else:
+            st.info("Sem dados de faturamento. Importe o arquivo de Faturamento.")
 
 # ─── GRÁFICO: PARTICIPAÇÃO POR CLIENTE ───────────────────────────────────────
 with col2:
@@ -360,37 +392,6 @@ with col2:
             margin=dict(t=40, b=20, l=20, r=20),
         )
         st.plotly_chart(fig_pie, use_container_width=True)
-
-# ─── DRILL-DOWN DIA A DIA ─────────────────────────────────────────────────────
-mes_sel = st.session_state.fat_mes_sel
-if mes_sel and not df_fat_filt.empty:
-    df_dia = df_fat_filt[df_fat_filt["mes_label"] == mes_sel].copy()
-    if not df_dia.empty:
-        df_dia["data_str"]  = df_dia[DATE_COL].dt.strftime("%Y-%m-%d")
-        df_dia["dia_label"] = df_dia[DATE_COL].dt.strftime("%d/%m")
-        df_dia_grp = (df_dia.groupby(["data_str", "dia_label", "tipo_tes"])["valor_atendido"]
-                      .sum().reset_index().sort_values("data_str"))
-        tickvals = df_dia_grp["data_str"].unique().tolist()
-        lbl_map  = df_dia_grp.drop_duplicates("data_str").set_index("data_str")["dia_label"]
-        ticktext = [lbl_map.get(v, v) for v in tickvals]
-        fig_dia = px.bar(df_dia_grp, x="data_str", y="valor_atendido", color="tipo_tes",
-                         title=f"Faturamento dia a dia — {mes_sel}",
-                         labels={"data_str": "Data", "valor_atendido": "R$", "tipo_tes": "Tipo"},
-                         color_discrete_map={"Venda": "#3B82F6", "Acerto Consignação": COR_TEAL},
-                         text_auto=".2s")
-        fig_dia.update_layout(
-            **CHART,
-            barmode="stack",
-            xaxis=dict(tickangle=-30, tickvals=tickvals, ticktext=ticktext,
-                       type="category", **GRID),
-            yaxis=dict(title="R$", **GRID),
-            legend=dict(orientation="h", y=1.08),
-            height=320,
-            margin=dict(t=40, b=10, l=10, r=10),
-        )
-        st.plotly_chart(fig_dia, use_container_width=True)
-    else:
-        st.session_state.fat_mes_sel = None
 
 # ─── GRÁFICO: % ACERTO POR CLIENTE ───────────────────────────────────────────
 col3, col4 = st.columns(2)
