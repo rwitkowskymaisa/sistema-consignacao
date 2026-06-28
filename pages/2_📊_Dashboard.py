@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import (
@@ -29,13 +29,12 @@ is_admin    = usuario["papel"] == "admin"
 cod_gcon_u  = usuario.get("cod_gcon")
 gcon_filter = None if is_admin else cod_gcon_u
 
-# Cores para gráficos (tema claro)
 CHART = dict(plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
              font_color="#374151", title_font_color="#111827",
              title_font_size=14)
 GRID  = dict(gridcolor="#F3F4F6", zerolinecolor="#E5E7EB")
 
-# ─── SIDEBAR — só logo e footer ───────────────────────────────────────────────
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 sidebar_header(usuario)
 sidebar_footer(usuario)
 
@@ -45,10 +44,19 @@ with st.spinner("Carregando dados..."):
     kpis       = get_kpis(gcon_filter)
     df_full    = get_analise_consignacao(gcon_filter)
     df_rank    = get_ranking_clientes(gcon_filter)
-    df_fat_mes = get_faturamento_por_mes(gcon_filter)
+    df_fat_raw = get_faturamento_df(gcon_filter, tipos_tes=["Venda", "Acerto Consignação"])
 
-# ─── CABEÇALHO COM FILTROS ─────────────────────────────────────────────────────
-# Linha do cabeçalho: título à esquerda, filtros à direita
+# Pré-processa datas do faturamento bruto
+DATE_COL = None
+if not df_fat_raw.empty:
+    DATE_COL = "data_nota" if "data_nota" in df_fat_raw.columns else "data_emissao"
+    df_fat_raw[DATE_COL] = pd.to_datetime(df_fat_raw[DATE_COL], errors="coerce")
+    df_fat_raw = df_fat_raw.dropna(subset=[DATE_COL])
+
+dmin_default = df_fat_raw[DATE_COL].dt.date.min() if DATE_COL and not df_fat_raw.empty else date(2025, 1, 1)
+dmax_default = df_fat_raw[DATE_COL].dt.date.max() if DATE_COL and not df_fat_raw.empty else date.today()
+
+# ─── CABEÇALHO + FILTROS ──────────────────────────────────────────────────────
 if is_admin:
     col_title, col_vend, col_cli = st.columns([3, 1.5, 2])
 else:
@@ -79,7 +87,7 @@ if is_admin:
             )
             clientes = get_clientes(gcon_filter)
 
-opts_cli  = ["Todos os clientes"] + [
+opts_cli = ["Todos os clientes"] + [
     f"{c['razao_social'][:28]} [{c['codigo_cliente']}]" for c in clientes
 ]
 with col_cli:
@@ -89,10 +97,44 @@ cliente_sel = None
 if sel_cli != "Todos os clientes":
     cliente_sel = sel_cli.split("[")[-1].rstrip("]")
 
+# ─── FILTROS DE DATA (segunda linha) ─────────────────────────────────────────
+col_lbl, col_di, col_df = st.columns([3, 1.5, 1.5])
+with col_lbl:
+    st.markdown(
+        "<div style='color:#6B7280;font-size:12px;padding-top:4px;'>📅 Período para gráficos de faturamento</div>",
+        unsafe_allow_html=True,
+    )
+with col_di:
+    data_ini = st.date_input("De", value=dmin_default, key="filter_di")
+with col_df:
+    data_fim = st.date_input("Até", value=dmax_default, key="filter_df")
+
 st.markdown("<hr style='margin:8px 0 16px 0;border-color:#E5E7EB;'>", unsafe_allow_html=True)
 
+# ─── APLICA FILTRO DE DATA NO FATURAMENTO ────────────────────────────────────
+if DATE_COL and not df_fat_raw.empty:
+    df_fat_filt = df_fat_raw[
+        (df_fat_raw[DATE_COL].dt.date >= data_ini) &
+        (df_fat_raw[DATE_COL].dt.date <= data_fim)
+    ].copy()
+else:
+    df_fat_filt = df_fat_raw.copy() if not df_fat_raw.empty else pd.DataFrame()
+
+# Reconstrói agregação mensal filtrada por data
+if not df_fat_filt.empty and DATE_COL:
+    df_fat_filt["mes"] = df_fat_filt[DATE_COL].dt.to_period("M").astype(str)
+    df_v = (df_fat_filt[df_fat_filt["tipo_tes"] == "Venda"]
+            .groupby("mes")["valor_atendido"].sum()
+            .reset_index().rename(columns={"valor_atendido": "receita_venda"}))
+    df_a = (df_fat_filt[df_fat_filt["tipo_tes"] == "Acerto Consignação"]
+            .groupby("mes")["valor_atendido"].sum()
+            .reset_index().rename(columns={"valor_atendido": "receita_acerto_csg"}))
+    df_fat_mes_plot = df_v.merge(df_a, on="mes", how="outer").fillna(0).sort_values("mes")
+else:
+    df_fat_mes_plot = pd.DataFrame()
+
 # ─── KPIs ─────────────────────────────────────────────────────────────────────
-pct = kpis["pct_acerto_medio"]
+pct     = kpis["pct_acerto_medio"]
 pct_cor = "green" if pct >= 40 else "amber" if pct >= 20 else "red"
 sg_cor  = "amber" if kpis["titulos_sem_giro"] > 0 else "green"
 
@@ -181,56 +223,53 @@ if cliente_sel and not df_full.empty:
         mc[2].metric("Saldo Atual", f"{qtde_sal:,}")
         mc[3].metric("% Acerto", f"{pct_cli:.1f}%")
 
-        # Faturamento mês a mês
-        df_fat_cli = get_faturamento_df(gcon_filter, tipos_tes=["Venda", "Acerto Consignação"])
+        # Faturamento mês a mês para o cliente
+        df_fat_cli = df_fat_filt.copy() if not df_fat_filt.empty else pd.DataFrame()
         col_ga, col_gb = st.columns(2)
 
-        if not df_fat_cli.empty:
+        if not df_fat_cli.empty and "codigo_cliente" in df_fat_cli.columns:
             df_fat_cli = df_fat_cli[df_fat_cli["codigo_cliente"] == cliente_sel].copy()
-            date_col   = "data_nota" if "data_nota" in df_fat_cli.columns else "data_emissao"
-            df_fat_cli[date_col] = pd.to_datetime(df_fat_cli[date_col], errors="coerce")
-            df_fat_cli = df_fat_cli.dropna(subset=[date_col])
 
-        if not df_fat_cli.empty:
-            df_fat_cli["mes"] = df_fat_cli[date_col].dt.to_period("M").astype(str)
-            df_mes_tipo = df_fat_cli.groupby(["mes","tipo_tes"]).agg(
-                receita=("valor_atendido","sum"), qtde=("qtd_atendida","sum")
-            ).reset_index().sort_values("mes")
-            df_mes = df_fat_cli.groupby("mes").agg(
-                receita=("valor_atendido","sum"), qtde=("qtd_atendida","sum")
-            ).reset_index().sort_values("mes")
+        if not df_fat_cli.empty and DATE_COL:
+            df_fat_cli["mes"] = df_fat_cli[DATE_COL].dt.to_period("M").astype(str)
+            df_mes_tipo = (df_fat_cli.groupby(["mes", "tipo_tes"])
+                           .agg(receita=("valor_atendido", "sum"), qtde=("qtd_atendida", "sum"))
+                           .reset_index().sort_values("mes"))
+            df_mes = (df_fat_cli.groupby("mes")
+                      .agg(receita=("valor_atendido", "sum"), qtde=("qtd_atendida", "sum"))
+                      .reset_index().sort_values("mes"))
 
             with col_ga:
                 fig = px.bar(df_mes_tipo, x="mes", y="receita", color="tipo_tes",
                              title="Receita Mensal por Tipo",
-                             labels={"mes":"Mês","receita":"R$","tipo_tes":"Tipo"},
-                             color_discrete_map={"Venda":"#3B82F6","Acerto Consignação":COR_TEAL})
-                fig.update_layout(**CHART, xaxis=dict(tickangle=-30,**GRID), yaxis=GRID, height=300,
-                                  legend=dict(orientation="h",y=1.1))
+                             labels={"mes": "Mês", "receita": "R$", "tipo_tes": "Tipo"},
+                             color_discrete_map={"Venda": "#3B82F6", "Acerto Consignação": COR_TEAL})
+                fig.update_layout(**CHART, xaxis=dict(tickangle=-30, **GRID), yaxis=GRID,
+                                  height=300, legend=dict(orientation="h", y=1.1))
                 st.plotly_chart(fig, use_container_width=True)
 
             with col_gb:
                 fig2 = px.line(df_mes, x="mes", y="qtde", markers=True,
                                title="Qtde Faturada por Mês",
-                               labels={"mes":"Mês","qtde":"Qtde"},
+                               labels={"mes": "Mês", "qtde": "Qtde"},
                                color_discrete_sequence=[COR_TEAL])
-                fig2.update_layout(**CHART, xaxis=dict(tickangle=-30,**GRID), yaxis=GRID, height=300)
+                fig2.update_layout(**CHART, xaxis=dict(tickangle=-30, **GRID), yaxis=GRID, height=300)
                 st.plotly_chart(fig2, use_container_width=True)
         else:
             with col_ga:
-                st.info("Sem dados de faturamento para este cliente.")
+                st.info("Sem dados de faturamento para este cliente no período selecionado.")
 
         # Tabela de títulos
         st.markdown('<div class="card-title" style="margin-top:8px;">Títulos em Consignação</div>',
                     unsafe_allow_html=True)
-        cols_show  = ["isbn","titulo","qtde_remessa","qtde_dev_acert","qtde_saldo",
-                      "pct_acerto","valor_liquido","dias_em_saldo"]
+        cols_show  = ["isbn", "titulo", "qtde_remessa", "qtde_dev_acert", "qtde_saldo",
+                      "pct_acerto", "valor_liquido", "dias_em_saldo"]
         cols_exist = [c for c in cols_show if c in df_cli.columns]
         df_show    = df_cli[cols_exist].copy()
-        RENAME = {"isbn":"ISBN","titulo":"Título","qtde_remessa":"Remessa",
-                  "qtde_dev_acert":"Dev/Acert","qtde_saldo":"Saldo",
-                  "pct_acerto":"% Acerto","valor_liquido":"Vlr Líq (R$)","dias_em_saldo":"Dias"}
-        df_show.columns = [RENAME.get(c,c) for c in cols_exist]
+        RENAME = {"isbn": "ISBN", "titulo": "Título", "qtde_remessa": "Remessa",
+                  "qtde_dev_acert": "Dev/Acert", "qtde_saldo": "Saldo",
+                  "pct_acerto": "% Acerto", "valor_liquido": "Vlr Líq (R$)", "dias_em_saldo": "Dias"}
+        df_show.columns = [RENAME.get(c, c) for c in cols_exist]
         if "% Acerto" in df_show.columns:
             df_show["% Acerto"] = df_show["% Acerto"].map("{:.1f}%".format)
         if "Vlr Líq (R$)" in df_show.columns:
@@ -240,60 +279,156 @@ if cliente_sel and not df_full.empty:
         st.dataframe(df_show, use_container_width=True, hide_index=True, height=360)
         st.markdown("<hr>", unsafe_allow_html=True)
 
-# ─── GRÁFICOS PRINCIPAIS ─────────────────────────────────────────────────────
+# ─── GRÁFICOS PRINCIPAIS ──────────────────────────────────────────────────────
 if df_full.empty:
     st.info("Sem dados. Acesse **Upload** para importar os arquivos.")
     st.stop()
 
 col1, col2 = st.columns(2)
 
+# ── Gráfico Faturamento (com drill-down por dia ao clicar) ───────────────────
 with col1:
-    st.markdown('<div class="content-card"><div class="card-title">Receita Mensal</div>', unsafe_allow_html=True)
-    if not df_fat_mes.empty:
+    st.markdown('<div class="content-card"><div class="card-title">Faturamento</div>',
+                unsafe_allow_html=True)
+    event_fat = None
+    if not df_fat_mes_plot.empty:
         fig_fat = go.Figure()
-        fig_fat.add_trace(go.Bar(
-            name="Venda", x=df_fat_mes["mes"],
-            y=df_fat_mes.get("receita_venda", []), marker_color="#3B82F6"
-        ))
-        if "receita_acerto_csg" in df_fat_mes.columns:
+        if "receita_venda" in df_fat_mes_plot.columns:
             fig_fat.add_trace(go.Bar(
-                name="Acerto Consignação", x=df_fat_mes["mes"],
-                y=df_fat_mes["receita_acerto_csg"], marker_color=COR_TEAL
+                name="Venda",
+                x=df_fat_mes_plot["mes"],
+                y=df_fat_mes_plot["receita_venda"],
+                marker_color="#3B82F6",
             ))
-        fig_fat.update_layout(**CHART, barmode="stack",
-                              xaxis=dict(tickangle=-30,**GRID), yaxis=GRID,
-                              legend=dict(orientation="h",y=1.08), height=320,
-                              yaxis_title="R$")
-        st.plotly_chart(fig_fat, use_container_width=True)
+        if "receita_acerto_csg" in df_fat_mes_plot.columns:
+            fig_fat.add_trace(go.Bar(
+                name="Acerto Consignação",
+                x=df_fat_mes_plot["mes"],
+                y=df_fat_mes_plot["receita_acerto_csg"],
+                marker_color=COR_TEAL,
+            ))
+        fig_fat.update_layout(
+            **CHART,
+            title=dict(text="Faturamento", font=dict(size=14)),
+            barmode="stack",
+            xaxis=dict(tickangle=-30, **GRID),
+            yaxis=dict(title="R$", **GRID),
+            legend=dict(orientation="h", y=1.08),
+            height=320,
+        )
+        event_fat = st.plotly_chart(
+            fig_fat,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="fat_mes_chart",
+        )
     else:
         st.info("Sem dados de faturamento. Importe o arquivo de Faturamento.")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ── Gráfico Participação por Cliente ─────────────────────────────────────────
 with col2:
-    st.markdown('<div class="content-card"><div class="card-title">Top 10 Clientes por Saldo</div>', unsafe_allow_html=True)
+    st.markdown('<div class="content-card"><div class="card-title">Partic. por Cliente</div>',
+                unsafe_allow_html=True)
     if not df_rank.empty:
         top10 = df_rank.head(10).copy()
-        fig_pie = px.pie(top10, names="razao_social", values="qtde_saldo",
-                         hole=0.5,
-                         color_discrete_sequence=px.colors.qualitative.Set2)
-        fig_pie.update_traces(textposition="outside", textinfo="percent+label",
-                               textfont_size=10)
-        fig_pie.update_layout(**CHART, height=320, showlegend=False,
-                               margin=dict(t=20, b=20, l=20, r=20))
+        fig_pie = px.pie(
+            top10,
+            names="razao_social",
+            values="qtde_saldo",
+            hole=0.5,
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig_pie.update_traces(
+            textposition="outside",
+            textinfo="percent+label",
+            textfont_size=10,
+        )
+        fig_pie.update_layout(
+            **CHART,
+            title=dict(text="Partic. por Cliente", font=dict(size=14)),
+            height=320,
+            showlegend=False,
+            margin=dict(t=40, b=20, l=20, r=20),
+        )
         st.plotly_chart(fig_pie, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ─── DRILL-DOWN DIA A DIA (clique no gráfico de Faturamento) ─────────────────
+mes_selecionado = None
+try:
+    if event_fat and event_fat.selection and event_fat.selection.points:
+        mes_selecionado = event_fat.selection.points[0].get("x")
+except Exception:
+    pass
+
+if mes_selecionado and DATE_COL and not df_fat_filt.empty:
+    # Filtra os dados do mês clicado
+    df_fat_filt["mes"] = df_fat_filt[DATE_COL].dt.to_period("M").astype(str)
+    df_dia = df_fat_filt[df_fat_filt["mes"] == mes_selecionado].copy()
+
+    if not df_dia.empty:
+        df_dia["data_str"] = df_dia[DATE_COL].dt.strftime("%Y-%m-%d")
+        df_dia["dia_label"] = df_dia[DATE_COL].dt.strftime("%d/%m")
+        df_dia_grp = (df_dia.groupby(["data_str", "dia_label", "tipo_tes"])["valor_atendido"]
+                      .sum().reset_index().sort_values("data_str"))
+
+        # Formata label do mês (ex: "2026-01" → "Jan/2026")
+        try:
+            mes_fmt = datetime.strptime(mes_selecionado, "%Y-%m").strftime("%b/%Y")
+        except Exception:
+            mes_fmt = mes_selecionado
+
+        st.markdown(
+            f'<div class="content-card"><div class="card-title">📅 Faturamento dia a dia — {mes_fmt}</div>',
+            unsafe_allow_html=True,
+        )
+        fig_dia = px.bar(
+            df_dia_grp,
+            x="data_str",
+            y="valor_atendido",
+            color="tipo_tes",
+            labels={"data_str": "Data", "valor_atendido": "R$", "tipo_tes": "Tipo"},
+            color_discrete_map={"Venda": "#3B82F6", "Acerto Consignação": COR_TEAL},
+            text_auto=".2s",
+        )
+        # Substitui datas brutas pelo label dd/mm no eixo X
+        tickvals = df_dia_grp["data_str"].unique().tolist()
+        ticktext = (df_dia_grp.drop_duplicates("data_str")
+                    .set_index("data_str")["dia_label"]
+                    .reindex(tickvals).tolist())
+        fig_dia.update_layout(
+            **CHART,
+            title=dict(text=f"Faturamento por dia — {mes_fmt}", font=dict(size=14)),
+            barmode="stack",
+            xaxis=dict(
+                tickangle=-30,
+                tickvals=tickvals,
+                ticktext=ticktext,
+                **GRID,
+            ),
+            yaxis=dict(title="R$", **GRID),
+            legend=dict(orientation="h", y=1.08),
+            height=320,
+        )
+        st.plotly_chart(fig_dia, use_container_width=True)
+        st.caption(f"💡 Clique em outro mês para alternar · Clique fora das barras para fechar o drill-down")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ─── GRÁFICOS SECUNDÁRIOS ─────────────────────────────────────────────────────
 col3, col4 = st.columns(2)
 
 with col3:
-    st.markdown('<div class="content-card"><div class="card-title">% Acerto por Cliente (top 20)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="content-card"><div class="card-title">% Acerto por Cliente (top 20)</div>',
+                unsafe_allow_html=True)
     if not df_rank.empty:
         df_ack = df_rank.sort_values("pct_acerto", ascending=True).tail(20)
         fig2 = px.bar(df_ack, x="pct_acerto", y="razao_social", orientation="h",
-                      labels={"pct_acerto":"% Acerto","razao_social":""},
+                      labels={"pct_acerto": "% Acerto", "razao_social": ""},
                       color="pct_acerto",
-                      color_continuous_scale=["#EF4444","#F59E0B","#10B981"],
-                      range_color=[0,100], text="pct_acerto")
+                      color_continuous_scale=["#EF4444", "#F59E0B", "#10B981"],
+                      range_color=[0, 100], text="pct_acerto")
         fig2.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
         fig2.update_layout(**CHART, coloraxis_showscale=False,
                            yaxis=dict(tickfont=dict(size=9)), xaxis=GRID, height=380)
@@ -301,15 +436,16 @@ with col3:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col4:
-    st.markdown('<div class="content-card"><div class="card-title">Top 15 Títulos sem Giro</div>', unsafe_allow_html=True)
+    st.markdown('<div class="content-card"><div class="card-title">Top 15 Títulos sem Giro</div>',
+                unsafe_allow_html=True)
     df_sg = df_full[df_full["sem_giro"]].copy() if not df_full.empty else pd.DataFrame()
     if not df_sg.empty:
         df_sg_grp = (df_sg.groupby("titulo")
-                     .agg(clientes_afetados=("codigo_cliente","nunique"),
-                          qtde_parada=("qtde_saldo","sum"))
-                     .reset_index().sort_values("qtde_parada",ascending=False).head(15))
+                     .agg(clientes_afetados=("codigo_cliente", "nunique"),
+                          qtde_parada=("qtde_saldo", "sum"))
+                     .reset_index().sort_values("qtde_parada", ascending=False).head(15))
         fig3 = px.bar(df_sg_grp, x="qtde_parada", y="titulo", orientation="h",
-                      labels={"qtde_parada":"Qtde parada","titulo":""},
+                      labels={"qtde_parada": "Qtde parada", "titulo": ""},
                       color_discrete_sequence=["#F59E0B"], text="qtde_parada")
         fig3.update_traces(textposition="outside")
         fig3.update_layout(**CHART, yaxis=dict(tickfont=dict(size=9)),
@@ -320,16 +456,17 @@ with col4:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ─── TABELA RANKING ──────────────────────────────────────────────────────────
-st.markdown('<div class="content-card"><div class="card-title">Top Clientes por Receita de Consignação</div>', unsafe_allow_html=True)
+st.markdown('<div class="content-card"><div class="card-title">Top Clientes por Receita de Consignação</div>',
+            unsafe_allow_html=True)
 if not df_rank.empty:
     df_show_rank = df_rank.head(30).copy()
     df_show_rank["pct_acerto"] = df_show_rank["pct_acerto"].map("{:.1f}%".format)
     df_show_rank["valor_liquido"] = df_show_rank["valor_liquido"].map("R$ {:,.2f}".format)
     df_show_rank.columns = [
-        {"codigo_cliente":"Código","razao_social":"Cliente","uf":"UF",
-         "qtde_remessa":"Remessa","qtde_dev_acert":"Dev/Acert",
-         "qtde_saldo":"Saldo","valor_liquido":"Vlr Líquido","titulos":"Títulos",
-         "pct_acerto":"% Acerto"}.get(c,c) for c in df_show_rank.columns
+        {"codigo_cliente": "Código", "razao_social": "Cliente", "uf": "UF",
+         "qtde_remessa": "Remessa", "qtde_dev_acert": "Dev/Acert",
+         "qtde_saldo": "Saldo", "valor_liquido": "Vlr Líquido", "titulos": "Títulos",
+         "pct_acerto": "% Acerto"}.get(c, c) for c in df_show_rank.columns
     ]
     st.dataframe(df_show_rank, use_container_width=True, hide_index=True, height=380)
     csv = df_rank.to_csv(index=False).encode("utf-8-sig")
