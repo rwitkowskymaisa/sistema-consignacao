@@ -227,41 +227,52 @@ def init_db():
         )""",
     ]
 
+    # ── Bloco 1: cria tabelas ──────────────────────────────────────────────────
     with eng.connect() as conn:
         for ddl in ddl_list:
             _exec(conn, ddl)
         conn.commit()
 
-        # Migração: adiciona upload_em em tabela_tes se não existir
-        # Usa information_schema (não gera erro se coluna não existe)
-        try:
-            if _is_pg():
-                row = _exec(conn, """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name = 'tabela_tes' AND column_name = 'upload_em'
-                """).fetchone()
-                if not row:
-                    _exec(conn, "ALTER TABLE tabela_tes ADD COLUMN upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-                    conn.commit()
-            else:
-                # SQLite: usa PRAGMA
-                rows = _exec(conn, "PRAGMA table_info(tabela_tes)").fetchall()
-                cols = [dict(r._mapping)["name"] for r in rows]
-                if "upload_em" not in cols:
-                    _exec(conn, "ALTER TABLE tabela_tes ADD COLUMN upload_em TIMESTAMP")
-                    conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+    # ── Bloco 2: migração isolada (conexão própria para não contaminar) ────────
+    _migrate_tabela_tes(eng)
 
-        # Admin padrão
+    # ── Bloco 3: admin padrão ─────────────────────────────────────────────────
+    with eng.connect() as conn:
         row = _exec(conn, "SELECT id FROM usuarios WHERE username = 'admin'").fetchone()
         if not row:
             _insert_user_conn(conn, "Administrador", "admin@empresa.com",
                               "admin", "admin123", "admin")
             conn.commit()
+
+
+def _migrate_tabela_tes(eng):
+    """Adiciona coluna upload_em em tabela_tes se não existir (migração segura)."""
+    try:
+        with eng.connect() as conn:
+            if _is_pg():
+                row = _exec(conn, """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'tabela_tes'
+                      AND column_name = 'upload_em'
+                """).fetchone()
+                if not row:
+                    _exec(conn,
+                        "ALTER TABLE tabela_tes "
+                        "ADD COLUMN upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    )
+                    conn.commit()
+            else:
+                # SQLite: PRAGMA table_info nunca falha
+                rows = _exec(conn, "PRAGMA table_info(tabela_tes)").fetchall()
+                col_names = [dict(r._mapping)["name"] for r in rows]
+                if "upload_em" not in col_names:
+                    _exec(conn,
+                        "ALTER TABLE tabela_tes ADD COLUMN upload_em TIMESTAMP"
+                    )
+                    conn.commit()
+    except Exception:
+        pass  # Se falhar, o sistema continua — upload_em será gravado pelo pandas
 
 
 # ─── SESSÕES ──────────────────────────────────────────────────────────────────
