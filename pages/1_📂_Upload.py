@@ -224,7 +224,8 @@ with st.expander("📦  **2. Saldo Consignado**  (remessa, devolução/acerto, s
                 s_cnpj     = select_col("CNPJ",            cols, ["CNPJ","cnpj"],               "s_cnpj")
                 s_cod_cli  = select_col("Cód. Cliente",    cols, ["Cod.","Cod","codigo_cliente"],"s_codcli", True)
                 s_loja     = select_col("Loja",            cols, ["Lj.","Loja"],                "s_loja")
-                s_gcon     = select_col("Gcon (vendedor)", cols, ["Gcon","gcon"],               "s_gcon")
+                s_gcon     = select_col("Gcon (código)",   cols, ["Gcon","gcon"],               "s_gcon")
+                s_nome_gcon= select_col("Vendedor (nome)", cols, ["Vendedor","vendedor","Nome Vendedor"],"s_nomegcon")
                 s_uf       = select_col("UF",              cols, ["UF","uf"],                   "s_uf")
                 s_razao    = select_col("Razão Social",    cols, ["Cliente","Razao Social"],     "s_razao", True)
             with c2:
@@ -251,7 +252,8 @@ with st.expander("📦  **2. Saldo Consignado**  (remessa, devolução/acerto, s
                 else:
                     mapa = {
                         "cod_loja": s_cod_loja, "cnpj": s_cnpj,
-                        "codigo_cliente": s_cod_cli, "loja": s_loja, "cod_gcon": s_gcon,
+                        "codigo_cliente": s_cod_cli, "loja": s_loja,
+                        "cod_gcon": s_gcon, "nome_gcon": s_nome_gcon,
                         "uf": s_uf, "razao_social": s_razao, "nf_serie": s_nf,
                         "data_emissao": s_data_em, "isbn": s_isbn, "cod_barras": s_barras,
                         "titulo": s_titulo, "autor": s_autor, "desconto": s_desconto,

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import (
     get_kpis, get_analise_consignacao, get_ranking_clientes,
     get_faturamento_por_mes, get_faturamento_df,
-    get_all_users, get_clientes, init_db
+    get_gcon_vendedores, get_clientes, init_db
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer, COR_TEAL
 from utils.auth import require_login
@@ -28,6 +28,18 @@ usuario = require_login()
 is_admin    = usuario["papel"] == "admin"
 cod_gcon_u  = usuario.get("cod_gcon")
 gcon_filter = None if is_admin else cod_gcon_u
+
+# Para admin: determina gcon_filter a partir do selectbox (session_state)
+# ANTES de carregar dados, para que kpis/análise já venham filtrados.
+_gcon_list: list = []
+if is_admin:
+    _gcon_list = get_gcon_vendedores()
+    _sel_vend  = st.session_state.get("sel_vendedor", "Todos os vendedores")
+    if _sel_vend != "Todos os vendedores":
+        _m = next((v for v in _gcon_list
+                   if f"{v['nome']} ({v['cod_gcon']})" == _sel_vend), None)
+        if _m:
+            gcon_filter = _m["cod_gcon"]
 
 # Tema base para todos os gráficos
 CHART = dict(
@@ -103,17 +115,10 @@ with col_title:
 
 if is_admin:
     with col_vend:
-        vendedores = [u for u in get_all_users() if u["papel"] == "vendedor" and u["ativo"]]
-        opts_gcon  = ["Todos os vendedores"] + [
-            f"{v['nome']} ({v['cod_gcon'] or '—'})" for v in vendedores
+        opts_gcon = ["Todos os vendedores"] + [
+            f"{v['nome']} ({v['cod_gcon']})" for v in _gcon_list
         ]
-        sel_vend = st.selectbox("Vendedor", opts_gcon)
-        if sel_vend != "Todos os vendedores":
-            gcon_filter = next(
-                (v["cod_gcon"] for v in vendedores
-                 if f"{v['nome']} ({v['cod_gcon'] or '—'})" == sel_vend), None
-            )
-            clientes = get_clientes(gcon_filter)
+        st.selectbox("Vendedor", opts_gcon, key="sel_vendedor")
 
 opts_cli = ["Todos os clientes"] + [
     f"{c['razao_social'][:28]} [{c['codigo_cliente']}]" for c in clientes
