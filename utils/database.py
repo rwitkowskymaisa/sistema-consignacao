@@ -134,6 +134,7 @@ def init_db():
             codigo_cliente TEXT,
             loja TEXT,
             cod_gcon TEXT,
+            nome_gcon TEXT,
             uf TEXT,
             razao_social TEXT,
             nf_serie TEXT,
@@ -233,8 +234,9 @@ def init_db():
             _exec(conn, ddl)
         conn.commit()
 
-    # ── Bloco 2: migração isolada (conexão própria para não contaminar) ────────
+    # ── Bloco 2: migrações isoladas (conexão própria para não contaminar) ───────
     _migrate_tabela_tes(eng)
+    _migrate_saldo_nome_gcon(eng)
 
     # ── Bloco 3: admin padrão ─────────────────────────────────────────────────
     with eng.connect() as conn:
@@ -243,6 +245,28 @@ def init_db():
             _insert_user_conn(conn, "Administrador", "admin@empresa.com",
                               "admin", "admin123", "admin")
             conn.commit()
+
+
+def _migrate_saldo_nome_gcon(eng):
+    """Adiciona coluna nome_gcon em saldo_consignado se não existir (migração segura)."""
+    try:
+        with eng.connect() as conn:
+            if _is_pg():
+                row = _exec(conn, """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name='saldo_consignado' AND column_name='nome_gcon'
+                """).fetchone()
+                if not row:
+                    _exec(conn, "ALTER TABLE saldo_consignado ADD COLUMN nome_gcon TEXT")
+                    conn.commit()
+            else:
+                rows = _exec(conn, "PRAGMA table_info(saldo_consignado)").fetchall()
+                cols = [dict(r._mapping)["name"] for r in rows]
+                if "nome_gcon" not in cols:
+                    _exec(conn, "ALTER TABLE saldo_consignado ADD COLUMN nome_gcon TEXT")
+                    conn.commit()
+    except Exception:
+        pass
 
 
 def _migrate_tabela_tes(eng):
@@ -379,6 +403,29 @@ def get_all_users() -> list:
     return [dict(r._mapping) for r in rows]
 
 
+def get_gcon_vendedores() -> list:
+    """
+    Retorna lista de vendedores únicos a partir dos Gcon presentes em saldo_consignado.
+    Prioridade de nome: nome_gcon (coluna do próprio arquivo) → usuarios.nome → cod_gcon.
+    Retorna: [{"cod_gcon": "VD0004", "nome": "Tatiana"}, ...]
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        rows = _exec(conn, """
+            SELECT sc.cod_gcon,
+                   COALESCE(sc.nome_gcon, u.nome, sc.cod_gcon) AS nome
+            FROM (
+                SELECT cod_gcon, MAX(nome_gcon) AS nome_gcon
+                FROM saldo_consignado
+                WHERE cod_gcon IS NOT NULL AND cod_gcon != ''
+                GROUP BY cod_gcon
+            ) sc
+            LEFT JOIN usuarios u ON u.cod_gcon = sc.cod_gcon AND u.ativo = 1
+            ORDER BY COALESCE(sc.nome_gcon, u.nome, sc.cod_gcon)
+        """).fetchall()
+    return [dict(r._mapping) for r in rows]
+
+
 def create_user(nome, email, username, password, papel="vendedor",
                 email_envio=None, cod_gcon=None):
     eng = get_engine()
@@ -440,7 +487,7 @@ def upsert_produtos(df: pd.DataFrame) -> int:
 def upsert_saldo_consignado(df: pd.DataFrame) -> int:
     eng = get_engine()
     cols = [
-        "cod_loja", "cnpj", "codigo_cliente", "loja", "cod_gcon", "uf",
+        "cod_loja", "cnpj", "codigo_cliente", "loja", "cod_gcon", "nome_gcon", "uf",
         "razao_social", "nf_serie", "data_emissao", "isbn", "cod_barras",
         "titulo", "autor", "desconto", "status_titulo",
         "qtde_remessa", "qtde_dev_acert", "qtde_saldo",
