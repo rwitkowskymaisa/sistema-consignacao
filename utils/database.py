@@ -747,7 +747,9 @@ def get_kpis(cod_gcon: str = None) -> dict:
             "titulos_sem_giro": 0, "clientes_sem_giro": 0,
         }
     return {
-        "total_clientes": int(df["codigo_cliente"].nunique()),
+        # Clientes ativos: conta por cod_loja (código + loja) para distinguir
+        # clientes com mesmo nome mas lojas diferentes (filiais).
+        "total_clientes": int(df["cod_loja"].nunique()) if "cod_loja" in df.columns else int(df["codigo_cliente"].nunique()),
         "total_titulos": int(df["isbn"].nunique()),
         "qtde_remessa_total": int(df["qtde_remessa"].sum()),
         "qtde_saldo_total": int(df["qtde_saldo"].sum()),
@@ -758,7 +760,7 @@ def get_kpis(cod_gcon: str = None) -> dict:
         "valor_liquido_total": float(df["valor_liquido"].sum()),
         "valor_potencial": float(df.get("valor_potencial", pd.Series([0])).sum()),
         "titulos_sem_giro": int(df[df["sem_giro"]]["isbn"].nunique()),
-        "clientes_sem_giro": int(df[df["sem_giro"]]["codigo_cliente"].nunique()),
+        "clientes_sem_giro": int(df[df["sem_giro"]]["cod_loja"].nunique()) if "cod_loja" in df.columns else int(df[df["sem_giro"]]["codigo_cliente"].nunique()),
     }
 
 
