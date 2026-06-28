@@ -333,6 +333,29 @@ with col1:
     # ── VISÃO MENSAL (padrão) ─────────────────────────────────────────────────
     else:
         if not df_fat_mes_plot.empty:
+            # Lê seleção pendente do widget ANTES de renderizar
+            # (o on_select="rerun" já popula st.session_state["fat_mes_chart"]
+            #  no início do rerun, permitindo trocar de view sem st.rerun() extra)
+            try:
+                chart_state = st.session_state.get("fat_mes_chart")
+                if chart_state is not None:
+                    sel = (chart_state if isinstance(chart_state, dict)
+                           else getattr(chart_state, "__dict__", {}))
+                    s   = sel.get("selection", {})
+                    pts = (s.get("points", []) if isinstance(s, dict)
+                           else list(getattr(s, "points", [])))
+                    if pts:
+                        pt    = pts[0]
+                        x_val = (pt.get("x") if isinstance(pt, dict)
+                                 else getattr(pt, "x", None))
+                        if x_val:
+                            st.session_state.fat_mes_sel = str(x_val)
+                            # Limpa seleção do widget para evitar loop
+                            del st.session_state["fat_mes_chart"]
+                            st.rerun()
+            except Exception:
+                pass
+
             fig_fat = go.Figure()
             if "receita_venda" in df_fat_mes_plot.columns:
                 fig_fat.add_trace(go.Bar(name="Venda",
@@ -354,24 +377,11 @@ with col1:
                 height=340,
                 margin=dict(t=40, b=10, l=10, r=10),
             )
-            event_fat = st.plotly_chart(fig_fat, use_container_width=True,
-                                         on_select="rerun", selection_mode="points",
-                                         key="fat_mes_chart")
-            # Captura mês clicado
-            try:
-                pts = []
-                if event_fat is not None:
-                    sel = getattr(event_fat, "selection", {})
-                    pts = (sel.get("points", []) if isinstance(sel, dict)
-                           else list(getattr(sel, "points", [])))
-                if pts:
-                    pt    = pts[0]
-                    x_val = pt.get("x") if isinstance(pt, dict) else getattr(pt, "x", None)
-                    if x_val:
-                        st.session_state.fat_mes_sel = str(x_val)
-                        st.rerun()
-            except Exception:
-                pass
+            # on_select="rerun" dispara um único rerun quando o usuário clica
+            # NÃO chamamos st.rerun() manualmente aqui para evitar duplo rerun
+            st.plotly_chart(fig_fat, use_container_width=True,
+                            on_select="rerun", selection_mode="points",
+                            key="fat_mes_chart")
         else:
             st.info("Sem dados de faturamento. Importe o arquivo de Faturamento.")
 
