@@ -166,7 +166,7 @@ k = st.columns(4)
 k[0].markdown(f"""<div class="kpi-card">
   <div class="kpi-label">Clientes Ativos</div>
   <div class="kpi-value teal">{fmt_br(kpis['total_clientes'])}</div>
-  <div class="kpi-sub">com saldo consignado</div>
+  <div class="kpi-sub">lojas/filiais com saldo consignado</div>
 </div>""", unsafe_allow_html=True)
 
 k[1].markdown(f"""<div class="kpi-card">
@@ -191,7 +191,7 @@ st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
 
 k2 = st.columns(4)
 k2[0].markdown(f"""<div class="kpi-card">
-  <div class="kpi-label">Títulos em Consignação</div>
+  <div class="kpi-label">Qtda. SKU Consignados</div>
   <div class="kpi-value">{fmt_br(kpis['total_titulos'])}</div>
   <div class="kpi-sub">ISBNs distintos</div>
 </div>""", unsafe_allow_html=True)

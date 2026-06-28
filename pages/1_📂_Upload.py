@@ -54,6 +54,28 @@ def fmt_data(iso_str):
 def preview_df(df, n=5):
     st.dataframe(df.head(n), use_container_width=True, height=160)
 
+
+def parse_numero_br(series: pd.Series) -> pd.Series:
+    """
+    Converte colunas numéricas em formato brasileiro (1.234,56) para float.
+    Funciona também com formato americano (1234.56) e valores já numéricos.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return series
+    s = (series.astype(str)
+               .str.strip()
+               .str.replace(r"R\$\s*", "", regex=True)   # remove R$
+               .str.replace(r"\s+", "", regex=True))      # remove espaços internos
+    # Formato BR: tem ponto como milhar E vírgula como decimal → "1.234,56"
+    br_mask = s.str.match(r"^\d{1,3}(\.\d{3})+(,\d+)?$")
+    if br_mask.any():
+        s = s.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    else:
+        # Só vírgula → provavelmente decimal BR → "1234,56"
+        s = s.str.replace(",", ".", regex=False)
+    return pd.to_numeric(s, errors="coerce")
+
+
 def select_col(label, cols_list, defaults, key, required=False):
     opcoes = ["(não usar)"] + cols_list
     idx = 0
@@ -220,8 +242,8 @@ with st.expander("📦  **2. Saldo Consignado**  (remessa, devolução/acerto, s
                 s_qtde_rem   = select_col("Qtde Remessa",   cols, ["Qtde Remet","Qtde Remessa"],"s_qtrem", True)
                 s_qtde_dev   = select_col("Qtde Dev/Acert", cols, ["Qtde Dev/Acert"],           "s_qtdev", True)
                 s_qtde_saldo = select_col("Qtde Saldo",     cols, ["Qtde Saldo","Saldo"],       "s_qtsaldo", True)
-                s_vl         = select_col("Valor Líquido",  cols, ["Valor Liquido ","valor_liquido"],"s_vl")
-                s_vb         = select_col("Valor Bruto",    cols, ["Valor Bruto"],              "s_vb")
+                s_vl         = select_col("Valor Líquido",  cols, ["Valor Liquido","Valor Líquido","VLR LIQUIDO","Vlr Liquido","valor_liquido"],"s_vl")
+                s_vb         = select_col("Valor Bruto",    cols, ["Valor Bruto","VLR BRUTO","Vlr Bruto","valor_bruto"],"s_vb")
 
             if st.button("💾 Importar Saldo Consignado", type="primary", key="btn_saldo"):
                 if any(v == "(não usar)" for v in [s_cod_cli, s_razao, s_isbn, s_qtde_rem, s_qtde_dev, s_qtde_saldo]):
@@ -241,7 +263,7 @@ with st.expander("📦  **2. Saldo Consignado**  (remessa, devolução/acerto, s
                     df_out = df_raw.rename(columns=rename)
                     for nc in ["qtde_remessa","qtde_dev_acert","qtde_saldo","valor_liquido","valor_bruto","desconto"]:
                         if nc in df_out.columns:
-                            df_out[nc] = pd.to_numeric(df_out[nc], errors="coerce").fillna(0)
+                            df_out[nc] = parse_numero_br(df_out[nc]).fillna(0)
                     df_out["data_emissao"] = pd.to_datetime(df_out.get("data_emissao"), errors="coerce")
                     with st.spinner("Importando..."):
                         n = upsert_saldo_consignado(df_out)
