@@ -161,6 +161,7 @@ def init_db():
             faturamento TEXT,
             status TEXT,
             tipo TEXT NOT NULL,
+            upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(cod_tes)
         )""",
         # FATURAMENTO
@@ -230,6 +231,16 @@ def init_db():
         for ddl in ddl_list:
             _exec(conn, ddl)
         conn.commit()
+
+        # Migração: adiciona upload_em em tabela_tes se não existir
+        try:
+            _exec(conn, "SELECT upload_em FROM tabela_tes LIMIT 1")
+        except Exception:
+            try:
+                _exec(conn, "ALTER TABLE tabela_tes ADD COLUMN upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                conn.commit()
+            except Exception:
+                pass
 
         # Admin padrão
         row = _exec(conn, "SELECT id FROM usuarios WHERE username = 'admin'").fetchone()
@@ -393,6 +404,7 @@ def upsert_produtos(df: pd.DataFrame) -> int:
         if col not in df.columns:
             df[col] = None
     df = df[cols_base].dropna(subset=["isbn"]).copy()
+    df["upload_em"] = datetime.now()
     with eng.connect() as conn:
         _exec(conn, "DELETE FROM produtos")
         conn.commit()
@@ -413,6 +425,7 @@ def upsert_saldo_consignado(df: pd.DataFrame) -> int:
         if col not in df.columns:
             df[col] = None
     df = df[cols].dropna(subset=["codigo_cliente", "isbn"]).copy()
+    df["upload_em"] = datetime.now()
     with eng.connect() as conn:
         _exec(conn, "DELETE FROM saldo_consignado")
         conn.commit()
@@ -430,6 +443,8 @@ def upsert_tes(df: pd.DataFrame) -> int:
             df[col] = None
     df = df[cols].dropna(subset=["cod_tes"]).copy()
     df["tipo"] = df["tipo"].fillna("Outros").str.strip()
+    # Registra timestamp de importação
+    df["upload_em"] = datetime.now()
     with eng.connect() as conn:
         _exec(conn, "DELETE FROM tabela_tes")
         conn.commit()
@@ -451,6 +466,7 @@ def upsert_faturamento(df: pd.DataFrame) -> int:
         if col not in df.columns:
             df[col] = None
     df = df[cols].dropna(subset=["codigo_cliente", "isbn"]).copy()
+    df["upload_em"] = datetime.now()
     with eng.connect() as conn:
         _exec(conn, "DELETE FROM faturamento")
         conn.commit()
