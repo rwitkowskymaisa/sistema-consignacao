@@ -324,8 +324,13 @@ section[data-testid="stSidebar"] [data-testid="stPageLink"][aria-current="page"]
     font-weight: 600 !important;
 }}
 
-/* ── Ocultar rótulo "app" e separadores do menu lateral ── */
-section[data-testid="stSidebar"] [data-testid="stSidebarNavItems"] span,
+/* ── Ocultar menu de navegação padrão do Streamlit (pages/) ── */
+[data-testid="stSidebarNav"],
+[data-testid="stSidebarNavItems"],
+[data-testid="stSidebarNavSeparator"] {{
+    display: none !important;
+}}
+/* fallback por classe para versões antigas */
 section[data-testid="stSidebar"] .st-emotion-cache-1rtdyuf,
 section[data-testid="stSidebar"] .st-emotion-cache-6tkfeg,
 section[data-testid="stSidebar"] p.st-emotion-cache-pkbazv {{
@@ -492,5 +497,13 @@ _JS_SIDEBAR = """
 def apply_theme():
     """Aplica o CSS global — chamar no início de cada página."""
     import streamlit as st
+    # Injeta o hide do menu padrão ANTES do CSS completo para minimizar o flash
+    st.markdown("""
+    <style>
+    [data-testid="stSidebarNav"],
+    [data-testid="stSidebarNavItems"],
+    [data-testid="stSidebarNavSeparator"] { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
     st.markdown(CSS_GLOBAL, unsafe_allow_html=True)
     st.components.v1.html(_JS_SIDEBAR, height=0)
