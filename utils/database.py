@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -403,6 +404,7 @@ def get_all_users() -> list:
     return [dict(r._mapping) for r in rows]
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_gcon_vendedores() -> list:
     """
     Retorna lista de vendedores únicos a partir dos Gcon presentes em saldo_consignado.
@@ -481,6 +483,7 @@ def upsert_produtos(df: pd.DataFrame) -> int:
         _exec(conn, "DELETE FROM produtos")
         conn.commit()
     df.to_sql("produtos", eng, if_exists="append", index=False)
+    st.cache_data.clear()
     return len(df)
 
 
@@ -503,6 +506,7 @@ def upsert_saldo_consignado(df: pd.DataFrame) -> int:
         conn.commit()
     df.to_sql("saldo_consignado", eng, if_exists="append", index=False)
     _sync_clientes()
+    st.cache_data.clear()
     return len(df)
 
 
@@ -521,6 +525,7 @@ def upsert_tes(df: pd.DataFrame) -> int:
         _exec(conn, "DELETE FROM tabela_tes")
         conn.commit()
     df.to_sql("tabela_tes", eng, if_exists="append", index=False)
+    st.cache_data.clear()
     return len(df)
 
 
@@ -543,6 +548,7 @@ def upsert_faturamento(df: pd.DataFrame) -> int:
         _exec(conn, "DELETE FROM faturamento")
         conn.commit()
     df.to_sql("faturamento", eng, if_exists="append", index=False)
+    st.cache_data.clear()
     return len(df)
 
 
@@ -581,6 +587,7 @@ def _sync_clientes():
 
 # ─── CONSULTAS ────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_saldo_df(cod_gcon: str = None) -> pd.DataFrame:
     eng = get_engine()
     if cod_gcon:
@@ -591,15 +598,18 @@ def get_saldo_df(cod_gcon: str = None) -> pd.DataFrame:
     return pd.read_sql(text("SELECT * FROM saldo_consignado"), eng)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_produtos_df() -> pd.DataFrame:
     return pd.read_sql(text("SELECT * FROM produtos"), get_engine())
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_tes_df() -> pd.DataFrame:
     return pd.read_sql(text("SELECT * FROM tabela_tes"), get_engine())
 
 
-def get_faturamento_df(cod_gcon: str = None, tipos_tes: list = None) -> pd.DataFrame:
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_faturamento_df(cod_gcon: str = None, tipos_tes: tuple = None) -> pd.DataFrame:
     eng = get_engine()
     q = """
         SELECT f.*, COALESCE(t.tipo, 'Outros') AS tipo_tes
@@ -621,6 +631,7 @@ def get_faturamento_df(cod_gcon: str = None, tipos_tes: list = None) -> pd.DataF
     return df
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_clientes(cod_gcon: str = None) -> list:
     eng = get_engine()
     with eng.connect() as conn:
@@ -718,6 +729,7 @@ def get_status_envio_mes(cod_gcon: str = None) -> pd.DataFrame:
 
 # ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_analise_consignacao(cod_gcon: str = None) -> pd.DataFrame:
     saldo = get_saldo_df(cod_gcon)
     if saldo.empty:
@@ -783,6 +795,7 @@ def get_ultima_atualizacao() -> dict:
     return resultado
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_kpis(cod_gcon: str = None) -> dict:
     df = get_analise_consignacao(cod_gcon)
     if df.empty:
@@ -811,6 +824,7 @@ def get_kpis(cod_gcon: str = None) -> dict:
     }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_ranking_clientes(cod_gcon: str = None) -> pd.DataFrame:
     df = get_analise_consignacao(cod_gcon)
     if df.empty:
