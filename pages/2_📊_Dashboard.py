@@ -11,9 +11,8 @@ from datetime import datetime, date
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import (
-    get_kpis, get_analise_consignacao, get_ranking_clientes,
-    get_faturamento_por_mes, get_faturamento_df,
-    get_gcon_vendedores, get_clientes, init_db
+    get_analise_consignacao, get_ranking_clientes,
+    get_faturamento_df, get_gcon_vendedores, get_clientes, init_db
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer, COR_TEAL
 from utils.auth import require_login
@@ -37,7 +36,7 @@ if is_admin:
     _sel_vend  = st.session_state.get("sel_vendedor", "Todos os vendedores")
     if _sel_vend != "Todos os vendedores":
         _m = next((v for v in _gcon_list
-                   if f"{v['nome']} ({v['cod_gcon']})" == _sel_vend), None)
+                   if f"{v['cod_gcon']} ({v['nome']})" == _sel_vend), None)
         if _m:
             gcon_filter = _m["cod_gcon"]
 
@@ -82,10 +81,49 @@ if "fat_mes_sel" not in st.session_state:
 # ─── DADOS ────────────────────────────────────────────────────────────────────
 with st.spinner("Carregando dados..."):
     clientes   = get_clientes(gcon_filter)
-    kpis       = get_kpis(gcon_filter)
-    df_full    = get_analise_consignacao(gcon_filter)
-    df_rank    = get_ranking_clientes(gcon_filter)
-    df_fat_raw = get_faturamento_df(gcon_filter, tipos_tes=["Venda", "Acerto Consignação"])
+    df_full    = get_analise_consignacao(gcon_filter)   # base única — kpis e ranking derivam daqui
+    df_fat_raw = get_faturamento_df(gcon_filter, tipos_tes=("Venda", "Acerto Consignação"))
+
+# ─── KPIs calculados a partir do df_full (sem nova query) ─────────────────────
+def _calc_kpis(df: pd.DataFrame) -> dict:
+    if df.empty:
+        return {"total_clientes": 0, "total_titulos": 0,
+                "qtde_remessa_total": 0, "qtde_saldo_total": 0,
+                "qtde_acerto_total": 0, "pct_acerto_medio": 0.0,
+                "valor_liquido_total": 0.0, "valor_potencial": 0.0,
+                "titulos_sem_giro": 0, "clientes_sem_giro": 0}
+    return {
+        "total_clientes": int(df["cod_loja"].nunique()) if "cod_loja" in df.columns else int(df["codigo_cliente"].nunique()),
+        "total_titulos": int(df["isbn"].nunique()),
+        "qtde_remessa_total": int(df["qtde_remessa"].sum()),
+        "qtde_saldo_total": int(df["qtde_saldo"].sum()),
+        "qtde_acerto_total": int(df["qtde_dev_acert"].sum()),
+        "pct_acerto_medio": round(float(
+            df["qtde_dev_acert"].sum() / df["qtde_remessa"].sum() * 100
+        ) if df["qtde_remessa"].sum() > 0 else 0, 1),
+        "valor_liquido_total": float(df["valor_liquido"].sum()),
+        "valor_potencial": float(df.get("valor_potencial", pd.Series([0])).sum()),
+        "titulos_sem_giro": int(df[df["sem_giro"]]["isbn"].nunique()),
+        "clientes_sem_giro": int(df[df["sem_giro"]]["cod_loja"].nunique()) if "cod_loja" in df.columns else int(df[df["sem_giro"]]["codigo_cliente"].nunique()),
+    }
+
+def _calc_ranking(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    ranking = df.groupby(["codigo_cliente", "razao_social", "uf"]).agg(
+        qtde_remessa=("qtde_remessa", "sum"),
+        qtde_dev_acert=("qtde_dev_acert", "sum"),
+        qtde_saldo=("qtde_saldo", "sum"),
+        valor_liquido=("valor_liquido", "sum"),
+        titulos=("isbn", "nunique"),
+    ).reset_index()
+    ranking["pct_acerto"] = (
+        ranking["qtde_dev_acert"] / ranking["qtde_remessa"].replace(0, 1) * 100
+    ).round(1)
+    return ranking.sort_values("qtde_saldo", ascending=False)
+
+kpis    = _calc_kpis(df_full)
+df_rank = _calc_ranking(df_full)
 
 DATE_COL = None
 if not df_fat_raw.empty:
@@ -116,7 +154,7 @@ with col_title:
 if is_admin:
     with col_vend:
         opts_gcon = ["Todos os vendedores"] + [
-            f"{v['nome']} ({v['cod_gcon']})" for v in _gcon_list
+            f"{v['cod_gcon']} ({v['nome']})" for v in _gcon_list
         ]
         st.selectbox("Vendedor", opts_gcon, key="sel_vendedor")
 
