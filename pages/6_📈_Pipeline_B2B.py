@@ -276,11 +276,11 @@ if not df_metas.empty:
         textposition="outside", textfont=dict(size=9),
     ))
     fig3.update_layout(
-        **CHART, barmode="group", height=360,
+        **CHART, title="", barmode="group", height=360,
         xaxis=dict(tickfont=dict(size=11), **GRID),
         yaxis=dict(tickformat=".2s", **GRID),
         legend=dict(orientation="h", y=-0.2, font=dict(size=11)),
-        margin=dict(t=20, b=10, l=10, r=10),
+        margin=dict(t=10, b=10, l=10, r=10),
         uniformtext_minsize=8, uniformtext_mode="hide",
     )
     st.plotly_chart(fig3, use_container_width=True)
