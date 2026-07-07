@@ -1036,6 +1036,18 @@ def get_ultima_atualizacao_pipeline() -> str | None:
     return str(val)[:16] if val else None
 
 
+def update_gcon_nome(cod_gcon: str, nome: str):
+    """Atualiza o nome de exibição de um vendedor em todos os registros de saldo."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        _exec(conn,
+            "UPDATE saldo_consignado SET nome_gcon = :nome WHERE cod_gcon = :cg",
+            {"nome": nome.strip(), "cg": cod_gcon}
+        )
+        conn.commit()
+    st.cache_data.clear()
+
+
 def upsert_pipeline_metas(df: pd.DataFrame) -> int:
     """
     Salva metas mensais por canal (Budget, Forecast, Real).
