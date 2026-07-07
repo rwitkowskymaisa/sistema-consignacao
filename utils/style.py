@@ -416,10 +416,11 @@ def sidebar_header(usuario: dict):
         '<div class="sidebar-section">Menu</div>',
         unsafe_allow_html=True
     )
-    st.sidebar.page_link("pages/2_📊_Dashboard.py",  label="📊  Dashboard")
-    st.sidebar.page_link("pages/1_📂_Upload.py",     label="📂  Upload de Arquivos")
-    st.sidebar.page_link("pages/3_👥_Clientes.py",   label="👥  Clientes")
-    st.sidebar.page_link("pages/4_📧_Envio_Mapa.py", label="📧  Envio do Mapa")
+    st.sidebar.page_link("pages/2_📊_Dashboard.py",      label="📊  Dashboard")
+    st.sidebar.page_link("pages/6_📈_Pipeline_B2B.py",   label="📈  Pipeline B2B")
+    st.sidebar.page_link("pages/1_📂_Upload.py",          label="📂  Upload de Arquivos")
+    st.sidebar.page_link("pages/3_👥_Clientes.py",        label="👥  Clientes")
+    st.sidebar.page_link("pages/4_📧_Envio_Mapa.py",      label="📧  Envio do Mapa")
     if usuario.get("papel") == "admin":
         st.sidebar.page_link("pages/5_⚙️_Configuracoes.py", label="⚙️  Configurações")
 
