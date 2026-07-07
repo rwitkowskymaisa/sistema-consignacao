@@ -159,7 +159,7 @@ opts_cli = ["Todos os clientes"] + [
     f"{c['razao_social'][:28]} [{c['codigo_cliente']}]" for c in clientes
 ]
 with col_cli:
-    sel_cli = st.selectbox("Cliente (drill-down)", opts_cli)
+    sel_cli = st.selectbox("Clientes", opts_cli)
 
 cliente_sel = None
 if sel_cli != "Todos os clientes":
