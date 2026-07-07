@@ -498,13 +498,5 @@ _JS_SIDEBAR = """
 def apply_theme():
     """Aplica o CSS global — chamar no início de cada página."""
     import streamlit as st
-    # Injeta o hide do menu padrão ANTES do CSS completo para minimizar o flash
-    st.markdown("""
-    <style>
-    [data-testid="stSidebarNav"],
-    [data-testid="stSidebarNavItems"],
-    [data-testid="stSidebarNavSeparator"] { display: none !important; }
-    </style>
-    """, unsafe_allow_html=True)
     st.markdown(CSS_GLOBAL, unsafe_allow_html=True)
     st.components.v1.html(_JS_SIDEBAR, height=0)
