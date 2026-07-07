@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import (
     get_all_users, create_user, update_user_password,
-    toggle_user_active, init_db
+    toggle_user_active, get_gcon_vendedores, update_gcon_nome, init_db
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer
 from utils.auth import require_login
@@ -37,7 +37,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tabs = st.tabs(["👤 Usuários", "📧 Email / Azure", "🚀 Deploy", "🔒 Minha Conta"])
+tabs = st.tabs(["👤 Usuários", "🏷️ Nomes Vendedores", "📧 Email / Azure", "🚀 Deploy", "🔒 Minha Conta"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — USUÁRIOS (somente admin)
@@ -95,9 +95,53 @@ with tabs[0]:
                     st.error("Preencha todos os campos obrigatórios.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — CONFIGURAÇÃO DE EMAIL / AZURE
+# TAB 2 — NOMES DOS VENDEDORES
 # ═══════════════════════════════════════════════════════════════════════════════
 with tabs[1]:
+    if not is_admin:
+        st.info("Somente administradores podem editar nomes.")
+    else:
+        st.subheader("Nomes dos Vendedores")
+        st.caption(
+            "Configure o nome de exibição de cada código Gcon. "
+            "O nome aparece no filtro de vendedor do Dashboard e nos relatórios."
+        )
+
+        gcon_list = get_gcon_vendedores()
+        if not gcon_list:
+            st.warning("Nenhum vendedor encontrado. Importe o Saldo Consignado primeiro.")
+        else:
+            for v in gcon_list:
+                c1, c2, c3 = st.columns([1.5, 2.5, 1])
+                with c1:
+                    st.markdown(
+                        f"<div style='padding:8px 0;font-size:13px;color:#6B7280;font-weight:600;'>"
+                        f"{v['cod_gcon']}</div>", unsafe_allow_html=True
+                    )
+                with c2:
+                    # Mostra campo de texto pré-preenchido com o nome atual
+                    # Se nome == cod_gcon, deixa vazio para sinalizar que precisa ser configurado
+                    valor_atual = v["nome"] if v["nome"] != v["cod_gcon"] else ""
+                    novo_nome = st.text_input(
+                        "Nome",
+                        value=valor_atual,
+                        placeholder="Ex: Raquel, Tatiana, Filial PR...",
+                        key=f"gcon_nome_{v['cod_gcon']}",
+                        label_visibility="collapsed",
+                    )
+                with c3:
+                    if st.button("Salvar", key=f"btn_gcon_{v['cod_gcon']}"):
+                        if novo_nome.strip():
+                            update_gcon_nome(v["cod_gcon"], novo_nome.strip())
+                            st.success(f"✅ {v['cod_gcon']} → {novo_nome.strip()}")
+                            st.rerun()
+                        else:
+                            st.warning("Digite um nome.")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — CONFIGURAÇÃO DE EMAIL / AZURE
+# ═══════════════════════════════════════════════════════════════════════════════
+with tabs[2]:
     st.subheader("Configuração do Outlook via Azure AD")
 
     st.markdown("""
@@ -186,7 +230,7 @@ AZURE_TENANT_ID     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — DEPLOY
 # ═══════════════════════════════════════════════════════════════════════════════
-with tabs[2]:
+with tabs[3]:
     st.subheader("🚀 Deploy — Supabase + GitHub + Railway")
 
     st.markdown("""
@@ -268,9 +312,9 @@ sqlalchemy>=2.0.0
 """, language="text")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — MINHA CONTA
+# TAB 5 — MINHA CONTA (antigo TAB 4)
 # ═══════════════════════════════════════════════════════════════════════════════
-with tabs[3]:
+with tabs[4]:
     st.subheader("Minha conta")
     st.markdown(f"**Nome:** {usuario['nome']}")
     st.markdown(f"**Username:** `{usuario['username']}`")

@@ -35,8 +35,7 @@ if is_admin:
     _gcon_list = get_gcon_vendedores()
     _sel_vend  = st.session_state.get("sel_vendedor", "Todos os vendedores")
     if _sel_vend != "Todos os vendedores":
-        _m = next((v for v in _gcon_list
-                   if f"{v['cod_gcon']} ({v['nome']})" == _sel_vend), None)
+        _m = next((v for v in _gcon_list if v["nome"] == _sel_vend), None)
         if _m:
             gcon_filter = _m["cod_gcon"]
 
@@ -153,9 +152,7 @@ with col_title:
 
 if is_admin:
     with col_vend:
-        opts_gcon = ["Todos os vendedores"] + [
-            f"{v['cod_gcon']} ({v['nome']})" for v in _gcon_list
-        ]
+        opts_gcon = ["Todos os vendedores"] + [v["nome"] for v in _gcon_list]
         st.selectbox("Vendedor", opts_gcon, key="sel_vendedor")
 
 opts_cli = ["Todos os clientes"] + [
