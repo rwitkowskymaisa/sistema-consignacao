@@ -11,8 +11,9 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.database import (
     upsert_produtos, upsert_saldo_consignado,
-    upsert_faturamento, upsert_tes,
-    get_ultima_atualizacao, init_db
+    upsert_faturamento, upsert_tes, upsert_pipeline_b2b,
+    upsert_pipeline_metas,
+    get_ultima_atualizacao, get_ultima_atualizacao_pipeline, init_db
 )
 from utils.style import apply_theme, sidebar_header, sidebar_footer, COR_TEAL
 from utils.auth import require_login
@@ -119,11 +120,37 @@ def status_card(icone, titulo, chave, descricao):
     </div>
     """, unsafe_allow_html=True)
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 with c1: status_card("📖", "Base de Produtos",    "produtos",         "Catálogo · Preços · Estoque")
 with c2: status_card("📦", "Saldo Consignado",    "saldo_consignado", "Remessa · Dev/Acerto · Saldo")
 with c3: status_card("💰", "Faturamento",         "faturamento",      "Vendas realizadas por cliente")
 with c4: status_card("🏷️", "Tabela TES",          "tabela_tes",       "Classificação de faturamento")
+
+# Card Pipeline B2B (usa função própria pois não está em get_ultima_atualizacao)
+_ult_pipe = get_ultima_atualizacao_pipeline()
+_ok_pipe  = _ult_pipe is not None
+with c5:
+    st.markdown(f"""
+    <div class="kpi-card" style="padding:16px 20px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span style="font-size:22px;">📈</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#111827;">Pipeline B2B</div>
+          <div style="font-size:11px;color:#6B7280;">Receita · Carteira · Canal · Pipeline</div>
+        </div>
+        <div style="margin-left:auto;text-align:right;">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                background:{'#10B981' if _ok_pipe else '#F59E0B'};margin-right:4px;"></span>
+          <span style="font-size:11px;color:{'#10B981' if _ok_pipe else '#F59E0B'};font-weight:600;">
+            {"Atualizado" if _ok_pipe else "Pendente"}
+          </span>
+        </div>
+      </div>
+      <div style="font-size:12px;color:{'#6B7280' if _ok_pipe else '#F59E0B'};margin-bottom:2px;">
+        🕐 {_ult_pipe or "Nunca importado"}
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
@@ -415,3 +442,143 @@ with st.expander("🏷️  **4. Tabela TES**  (classifica faturamento: Venda / A
                     st.rerun()
         except Exception as e:
             st.error(f"Erro: {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. PIPELINE B2B
+# ══════════════════════════════════════════════════════════════════════════════
+with st.expander("📈  **5. Pipeline B2B**  (receita por carteira/canal · evolutivo 2023-2026 · pipeline)", expanded=False):
+    st.info(
+        "Importe o arquivo **Receita_Clientes_Mensal.xlsx** (aba **Agrupado**). "
+        "O sistema lê automaticamente os dados mensais 2023-2026, totais anuais e pipeline do mês."
+    )
+    f5 = st.file_uploader("Excel Pipeline B2B (aba Agrupado)", type=["xlsx","xls"], key="f_pipeline")
+    if f5:
+        try:
+            df_raw = pd.read_excel(f5, sheet_name="Agrupado", header=3, dtype=str)
+            df_raw.columns = [str(c) for c in df_raw.columns]
+            df_raw = df_raw[df_raw["Carteira"].notna()].copy()
+            st.success(f"✅ {len(df_raw):,} clientes encontrados na aba Agrupado")
+            preview_df(df_raw[["Clientes","Carteira","Canais"]].head(5))
+
+            if st.button("💾 Importar Pipeline B2B", type="primary", key="btn_pipeline"):
+                with st.spinner("Processando dados..."):
+                    # ── Colunas mensais 2023-2026 ────────────────────────────
+                    meses_cols = {}
+                    for ano in [2023, 2024, 2025, 2026]:
+                        for mes in range(1, 13):
+                            chave = f"{ano}-{mes:02d}-01 00:00:00"
+                            if chave in df_raw.columns:
+                                meses_cols[(ano, mes)] = chave
+
+                    # ── Formato longo (mensal) ───────────────────────────────
+                    rows_mensal = []
+                    for (ano, mes), col in meses_cols.items():
+                        tmp = df_raw[["Agrupador2","Clientes","Carteira","Canais", col]].copy()
+                        tmp.columns = ["cod_cliente","nome_cliente","carteira","canal","valor"]
+                        tmp["ano"] = ano
+                        tmp["mes"] = mes
+                        tmp["valor"] = pd.to_numeric(tmp["valor"], errors="coerce").fillna(0)
+                        rows_mensal.append(tmp)
+                    df_mensal = pd.concat(rows_mensal, ignore_index=True)
+
+                    # ── Resumo por cliente ───────────────────────────────────
+                    def _num(col):
+                        return pd.to_numeric(
+                            df_raw.get(col, pd.Series([0]*len(df_raw))), errors="coerce"
+                        ).fillna(0).values
+
+                    df_resumo = pd.DataFrame({
+                        "cod_cliente":  df_raw["Agrupador2"].astype(str).values,
+                        "nome_cliente": df_raw["Clientes"].values,
+                        "carteira":     df_raw["Carteira"].values,
+                        "canal":        df_raw["Canais"].values,
+                        "tt_2023":      _num("TT 2023"),
+                        "tt_2024":      _num("TT 2024"),
+                        "tt_2025":      _num("TT2025"),
+                        "ytd_2026":     _num("TT2026"),
+                        "ytd_2025":     _num("YTD AA"),
+                        "pct_ytd":      _num("(%) YTD AA"),
+                        "gap_ytd":      _num("Gap YTD 25vs26"),
+                        "pipeline_jul": _num("Pipelie Jul/26"),
+                    })
+
+                    n_m, n_r = upsert_pipeline_b2b(df_mensal, df_resumo)
+
+                st.success(f"✅ {n_r:,} clientes · {n_m:,} registros mensais importados!")
+
+                # Sumário por carteira
+                st.markdown("**Resumo por Carteira:**")
+                cart = df_resumo.groupby("carteira").agg(
+                    Clientes=("cod_cliente","count"),
+                    YTD_2026=("ytd_2026","sum"),
+                    YTD_2025=("ytd_2025","sum"),
+                    Pipeline=("pipeline_jul","sum"),
+                ).reset_index()
+                for col in ["YTD_2026","YTD_2025","Pipeline"]:
+                    cart[col] = cart[col].map("R$ {:,.0f}".format)
+                st.dataframe(cart, use_container_width=True, hide_index=True)
+
+                # ── Aba Metas (Budget / Forecast / Real por canal/mês) ───────
+                MESES_MAP = {
+                    "jan":"01","fev":"02","mar":"03","abr":"04","mai":"05","jun":"06",
+                    "jul":"07","ago":"08","set":"09","out":"10","nov":"11","dez":"12"
+                }
+                try:
+                    xl_sheets = pd.ExcelFile(f5).sheet_names
+                    if "Metas" in xl_sheets:
+                        with st.spinner("Lendo aba Metas..."):
+                            df_metas_raw = pd.read_excel(f5, sheet_name="Metas", header=None)
+                            months_row  = df_metas_raw.iloc[0]
+                            ano_atual   = datetime.now().year
+
+                            # Encontra grupos de colunas por mês (posição onde aparece o nome do mês)
+                            month_groups = []
+                            for idx, val in enumerate(months_row):
+                                if pd.notna(val):
+                                    chave = str(val).strip().lower()[:3]
+                                    if chave in MESES_MAP:
+                                        month_groups.append((str(val).strip(), int(idx)))
+
+                            # Linhas de dados (a partir da linha 3 do Excel = iloc[2])
+                            # Exclui linhas de totais e cabeçalho
+                            data_rows = df_metas_raw.iloc[2:].copy()
+                            data_rows = data_rows[data_rows.iloc[:, 0].notna()].copy()
+                            data_rows = data_rows[
+                                ~data_rows.iloc[:, 0].astype(str).str.strip()
+                                 .str.lower().isin(["nan", "", "canais"])
+                                & ~data_rows.iloc[:, 0].astype(str).str.strip()
+                                 .str.startswith("Total")
+                            ].copy()
+
+                            def _safe_float(x):
+                                try:
+                                    return float(x) if pd.notna(x) else None
+                                except (ValueError, TypeError):
+                                    return None
+
+                            records_metas = []
+                            for month_name, start_col in month_groups:
+                                chave = month_name.lower()[:3]
+                                mes_str = f"{ano_atual}-{MESES_MAP[chave]}"
+                                for _, row in data_rows.iterrows():
+                                    canal = str(row.iloc[0]).strip()
+                                    records_metas.append({
+                                        "canal":      canal,
+                                        "mes":        mes_str,
+                                        "budget":     _safe_float(row.iloc[start_col]),
+                                        "forecast":   _safe_float(row.iloc[start_col + 1]),
+                                        "real_value": _safe_float(row.iloc[start_col + 2]),
+                                    })
+
+                            df_metas_long = pd.DataFrame(records_metas)
+                            n_metas = upsert_pipeline_metas(df_metas_long)
+                        st.success(f"✅ Metas: {n_metas:,} registros importados (Budget/Forecast/Real por canal/mês)")
+                    else:
+                        st.warning("⚠️ Aba 'Metas' não encontrada no arquivo — Budget/Forecast não foram importados. "
+                                   "Adicione a aba 'Metas' ao Excel e reimporte.")
+                except Exception as e_metas:
+                    st.warning(f"⚠️ Não foi possível ler a aba Metas: {e_metas}")
+
+                st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao processar Pipeline B2B: {e}")
