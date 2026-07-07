@@ -227,6 +227,45 @@ def init_db():
             criado_em TEXT,
             expira_em TEXT
         )""",
+        # PIPELINE B2B — dados mensais por cliente (formato longo)
+        f"""CREATE TABLE IF NOT EXISTS pipeline_b2b_mensal (
+            id {serial} PRIMARY KEY,
+            cod_cliente TEXT,
+            nome_cliente TEXT,
+            carteira TEXT,
+            canal TEXT,
+            ano INTEGER,
+            mes INTEGER,
+            valor REAL DEFAULT 0,
+            upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # PIPELINE B2B — resumo por cliente (totais anuais + pipeline + YTD)
+        f"""CREATE TABLE IF NOT EXISTS pipeline_b2b_resumo (
+            id {serial} PRIMARY KEY,
+            cod_cliente TEXT,
+            nome_cliente TEXT,
+            carteira TEXT,
+            canal TEXT,
+            tt_2023 REAL DEFAULT 0,
+            tt_2024 REAL DEFAULT 0,
+            tt_2025 REAL DEFAULT 0,
+            ytd_2026 REAL DEFAULT 0,
+            ytd_2025 REAL DEFAULT 0,
+            pct_ytd REAL DEFAULT 0,
+            gap_ytd REAL DEFAULT 0,
+            pipeline_jul REAL DEFAULT 0,
+            upload_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # PIPELINE B2B — metas mensais por canal (Budget / Forecast / Real)
+        f"""CREATE TABLE IF NOT EXISTS pipeline_b2b_metas (
+            id           {serial} PRIMARY KEY,
+            canal        TEXT NOT NULL,
+            mes          TEXT NOT NULL,
+            budget       REAL,
+            forecast     REAL,
+            real_value   REAL,
+            atualizado_em TEXT
+        )""",
     ]
 
     # ── Bloco 1: cria tabelas ──────────────────────────────────────────────────
@@ -906,3 +945,129 @@ def get_acerto_vs_faturamento(cod_gcon: str = None) -> pd.DataFrame:
     ).reset_index()
 
     return saldo_grp.merge(fat_grp, on="codigo_cliente", how="left").fillna({"receita_total": 0})
+
+
+# ─── PIPELINE B2B ─────────────────────────────────────────────────────────────
+
+def upsert_pipeline_b2b(df_mensal: pd.DataFrame, df_resumo: pd.DataFrame) -> tuple:
+    """
+    Salva dados do Pipeline B2B em duas tabelas:
+      - pipeline_b2b_mensal: dados mensais (formato longo)
+      - pipeline_b2b_resumo: totais por cliente (TT2023-2026, YTD, pipeline)
+    Retorna (n_mensal, n_resumo).
+    """
+    eng = get_engine()
+
+    cols_mensal = ["cod_cliente", "nome_cliente", "carteira", "canal", "ano", "mes", "valor"]
+    cols_resumo = ["cod_cliente", "nome_cliente", "carteira", "canal",
+                   "tt_2023", "tt_2024", "tt_2025", "ytd_2026",
+                   "ytd_2025", "pct_ytd", "gap_ytd", "pipeline_jul"]
+
+    for c in cols_mensal:
+        if c not in df_mensal.columns:
+            df_mensal[c] = None
+    for c in cols_resumo:
+        if c not in df_resumo.columns:
+            df_resumo[c] = None
+
+    df_mensal = df_mensal[cols_mensal].copy()
+    df_resumo  = df_resumo[cols_resumo].copy()
+    ts = datetime.now()
+    df_mensal["upload_em"] = ts
+    df_resumo["upload_em"]  = ts
+
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM pipeline_b2b_mensal")
+        _exec(conn, "DELETE FROM pipeline_b2b_resumo")
+        conn.commit()
+
+    df_mensal.to_sql("pipeline_b2b_mensal", eng, if_exists="append", index=False)
+    df_resumo.to_sql("pipeline_b2b_resumo",  eng, if_exists="append", index=False)
+    st.cache_data.clear()
+    return len(df_mensal), len(df_resumo)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_pipeline_mensal(carteira: str = None) -> pd.DataFrame:
+    """Dados mensais 2023-2026, filtráveis por carteira."""
+    eng = get_engine()
+    q = "SELECT * FROM pipeline_b2b_mensal WHERE ano >= 2023"
+    params = {}
+    if carteira:
+        q += " AND carteira = :c"
+        params["c"] = carteira
+    return pd.read_sql(text(q), eng, params=params or None)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_pipeline_resumo(carteira: str = None) -> pd.DataFrame:
+    """Resumo por cliente com totais anuais, YTD e pipeline."""
+    eng = get_engine()
+    q = "SELECT * FROM pipeline_b2b_resumo"
+    params = {}
+    if carteira:
+        q += " WHERE carteira = :c"
+        params["c"] = carteira
+    q += " ORDER BY ytd_2026 DESC"
+    return pd.read_sql(text(q), eng, params=params or None)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_pipeline_carteiras() -> list:
+    """Lista de carteiras disponíveis na base Pipeline B2B."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        rows = _exec(conn,
+            "SELECT DISTINCT carteira FROM pipeline_b2b_resumo "
+            "WHERE carteira IS NOT NULL ORDER BY carteira"
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_ultima_atualizacao_pipeline() -> str | None:
+    """Retorna o timestamp da última importação do Pipeline B2B."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        row = _exec(conn,
+            "SELECT MAX(upload_em) as ult FROM pipeline_b2b_resumo"
+        ).fetchone()
+    val = dict(row._mapping)["ult"] if row else None
+    return str(val)[:16] if val else None
+
+
+def upsert_pipeline_metas(df: pd.DataFrame) -> int:
+    """
+    Salva metas mensais por canal (Budget, Forecast, Real).
+    df deve ter colunas: canal, mes, budget, forecast, real_value
+    """
+    eng = get_engine()
+    cols = ["canal", "mes", "budget", "forecast", "real_value"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
+    df = df[cols].dropna(subset=["canal", "mes"]).copy()
+    df["atualizado_em"] = datetime.now().isoformat()
+    with eng.connect() as conn:
+        _exec(conn, "DELETE FROM pipeline_b2b_metas")
+        conn.commit()
+    df.to_sql("pipeline_b2b_metas", eng, if_exists="append", index=False)
+    st.cache_data.clear()
+    return len(df)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_pipeline_metas(mes: str = None) -> pd.DataFrame:
+    """
+    Retorna metas por canal.
+    Se mes informado (formato 'YYYY-MM'), filtra pelo mês.
+    """
+    eng = get_engine()
+    if mes:
+        return pd.read_sql(
+            text("SELECT * FROM pipeline_b2b_metas WHERE mes = :m ORDER BY canal"),
+            eng, params={"m": mes}
+        )
+    return pd.read_sql(
+        text("SELECT * FROM pipeline_b2b_metas ORDER BY canal, mes"), eng
+    )
