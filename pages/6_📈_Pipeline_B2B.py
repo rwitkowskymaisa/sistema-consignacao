@@ -189,19 +189,14 @@ def _bar_evolutivo(df_r, grupo_col, titulo):
             marker_color=cor,
             marker_line_color=cor_border,
             marker_line_width=1 if label == "YTD 2025" else 0,
-            text=agg[col].apply(fmt_m),
-            textposition="outside",
-            textangle=-90,
-            textfont=dict(size=9),
-            cliponaxis=False,
         ))
 
     fig.update_layout(
-        **CHART, title=titulo, barmode="group", height=370,
+        **CHART, title=titulo, barmode="group", height=300,
         xaxis=dict(tickfont=dict(size=11), **GRID),
-        yaxis=dict(tickformat=".2s", range=[0, y_max], **GRID),
-        legend=dict(orientation="h", y=-0.22, font=dict(size=10)),
-        margin=dict(t=50, b=10, l=10, r=10),
+        yaxis=dict(tickformat=".2s", **GRID),
+        legend=dict(orientation="h", y=-0.25, font=dict(size=10)),
+        margin=dict(t=40, b=10, l=10, r=10),
     )
     return fig
 
