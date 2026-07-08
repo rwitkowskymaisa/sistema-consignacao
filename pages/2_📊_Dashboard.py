@@ -141,8 +141,8 @@ else:
 
 with col_title:
     st.markdown(f"""
-    <div style="padding:8px 0 0 0;">
-      <div class="page-title">Dashboard Geral</div>
+    <div style="padding:4px 0 0 0;">
+      <div class="page-title">Consignação</div>
       <div class="page-subtitle">
           {usuario['nome']} &nbsp;·&nbsp;
           Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}
@@ -172,7 +172,7 @@ with st.expander("📅 Filtro de período — gráficos de faturamento", expande
     with col_df:
         data_fim = st.date_input("Até", value=dmax_def, format="DD/MM/YYYY", key="filter_df")
 
-st.markdown("<hr style='margin:8px 0 16px 0;border-color:#E5E7EB;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin:4px 0 8px 0;border-color:#E5E7EB;'>", unsafe_allow_html=True)
 
 # ─── FILTRA POR DATA ──────────────────────────────────────────────────────────
 if DATE_COL and not df_fat_raw.empty:
@@ -227,7 +227,7 @@ k[3].markdown(f"""<div class="kpi-card">
   <div class="kpi-sub">em {fmt_br(kpis['clientes_sem_giro'])} clientes · 0 devolução</div>
 </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
 
 k2 = st.columns(4)
 k2[0].markdown(f"""<div class="kpi-card">
@@ -255,7 +255,7 @@ k2[3].markdown(f"""<div class="kpi-card">
   <div class="kpi-sub">valor consignado em aberto</div>
 </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
 
 # ─── DRILL-DOWN POR CLIENTE ──────────────────────────────────────────────────
 if cliente_sel and not df_full.empty:
