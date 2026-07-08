@@ -191,8 +191,8 @@ def _bar_evolutivo(df_r, grupo_col, titulo):
             marker_line_width=1 if label == "YTD 2025" else 0,
             text=agg[col].apply(fmt_m),
             textposition="outside",
-            textangle=0,
-            textfont=dict(size=8),
+            textangle=-90,
+            textfont=dict(size=9),
             cliponaxis=False,
         ))
 
