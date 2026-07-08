@@ -169,6 +169,10 @@ def _bar_evolutivo(df_r, grupo_col, titulo):
         ytd_2025=("ytd_2025","sum"),
     ).reset_index().sort_values("ytd_2026", ascending=False)
 
+    # Calcula teto do eixo Y com 30% de folga para caber os rótulos
+    max_val = agg[["tt_2023","tt_2024","tt_2025","ytd_2026","ytd_2025"]].max().max()
+    y_max   = max_val * 1.35 if max_val > 0 else 1
+
     fig = go.Figure()
     for label, col, cor in [
         ("2023",     "tt_2023",  COR_2023),
@@ -187,16 +191,17 @@ def _bar_evolutivo(df_r, grupo_col, titulo):
             marker_line_width=1 if label == "YTD 2025" else 0,
             text=agg[col].apply(fmt_m),
             textposition="outside",
+            textangle=0,
             textfont=dict(size=8),
+            cliponaxis=False,
         ))
 
     fig.update_layout(
-        **CHART, title=titulo, barmode="group", height=360,
+        **CHART, title=titulo, barmode="group", height=370,
         xaxis=dict(tickfont=dict(size=11), **GRID),
-        yaxis=dict(tickformat=".2s", **GRID),
+        yaxis=dict(tickformat=".2s", range=[0, y_max], **GRID),
         legend=dict(orientation="h", y=-0.22, font=dict(size=10)),
-        margin=dict(t=40, b=10, l=10, r=10),
-        uniformtext_minsize=7, uniformtext_mode="hide",
+        margin=dict(t=50, b=10, l=10, r=10),
     )
     return fig
 
